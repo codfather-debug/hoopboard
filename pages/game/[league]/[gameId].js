@@ -301,7 +301,7 @@ function LeadersTable({ leaders }) {
               color: 'var(--accent)',
               marginTop: 2,
             }}>
-              {l.value} {l.stat.toUpperCase()}
+              {l.value} {(l.stat || '').toUpperCase()}
             </div>
           </div>
         </div>
