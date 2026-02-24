@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
 
-export default function GamePage({ game, summary, league }) {
+export default function GamePage({ game, summary, league, debugInfo }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
@@ -172,6 +172,28 @@ export default function GamePage({ game, summary, league }) {
               borderRadius: 4,
             }}>
               GAME HAS NOT STARTED · CHECK BACK SOON
+            </div>
+          )}
+
+          {/* Temporary debug panel - remove after fixing */}
+          {debugInfo && (
+            <div style={{
+              marginTop: 40,
+              padding: 16,
+              background: '#0f0f0f',
+              border: '1px solid #333',
+              borderRadius: 4,
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 10,
+              color: '#888',
+              wordBreak: 'break-all',
+              whiteSpace: 'pre-wrap',
+            }}>
+              <div style={{ color: 'var(--accent)', marginBottom: 8 }}>DEBUG (will remove)</div>
+              <div><strong>Top Keys:</strong> {debugInfo.topKeys?.join(', ')}</div>
+              <div style={{ marginTop: 8 }}><strong>Boxscore Keys:</strong> {debugInfo.boxscoreKeys?.join(', ')}</div>
+              <div style={{ marginTop: 8 }}><strong>Leaders Raw:</strong> {debugInfo.leadersRaw}</div>
+              <div style={{ marginTop: 8 }}><strong>Players Raw:</strong> {debugInfo.playersRaw}</div>
             </div>
           )}
         </main>
@@ -425,15 +447,23 @@ export async function getServerSideProps({ params }) {
       // summary not available
     }
 
+    const debugInfo = summary ? {
+      topKeys: Object.keys(summary),
+      leadersRaw: JSON.stringify(summary.leaders)?.slice(0, 1000) || 'none',
+      boxscoreKeys: summary.boxscore ? Object.keys(summary.boxscore) : [],
+      playersRaw: JSON.stringify(summary.boxscore?.players?.[0])?.slice(0, 1000) || 'none',
+    } : null
+
     return {
       props: {
         game,
         summary,
         league,
+        debugInfo,
       }
     }
   } catch (err) {
     console.error(err)
-    return { props: { game: null, summary: null, league } }
+    return { props: { game: null, summary: null, league, debugInfo: null } }
   }
 }
