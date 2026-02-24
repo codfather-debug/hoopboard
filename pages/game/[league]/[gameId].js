@@ -1,8 +1,12 @@
 import Head from 'next/head'
 import Link from 'next/link'
-import { getGameSummary, parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
+import { useState, useEffect } from 'react'
+import { parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
 
 export default function GamePage({ game, summary, league }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
   if (!game) {
     return (
       <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center', fontFamily: '"IBM Plex Mono", monospace' }}>
@@ -106,9 +110,9 @@ export default function GamePage({ game, summary, league }) {
                     fontSize: 14,
                     color: 'var(--muted)',
                   }}>
-                    {new Date(game.date).toLocaleTimeString('en-US', {
+                    {mounted ? new Date(game.date).toLocaleTimeString('en-US', {
                       hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
-                    })}
+                    }) : ''}
                   </div>
                 )}
               </div>

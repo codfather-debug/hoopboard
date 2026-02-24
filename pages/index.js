@@ -1,10 +1,13 @@
 import Head from 'next/head'
 import Link from 'next/link'
+import { useState, useEffect } from 'react'
 import { getNBAScoreboard, getNCAA_MBScoreboard, parseGame } from '../lib/espn'
 
 export default function Home({ nbaGames, ncaaGames, fetchedAt }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   const now = new Date(fetchedAt)
-  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  const timeStr = mounted ? now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''
 
   return (
     <>
@@ -185,8 +188,10 @@ function GameCard({ game, league }) {
   const homeWins = hasScore && Number(game.home.score) > Number(game.away.score)
   const awayWins = hasScore && Number(game.away.score) > Number(game.home.score)
 
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   const timeDisplay = game.isScheduled
-    ? new Date(game.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })
+    ? (mounted ? new Date(game.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '')
     : game.isLive
     ? `Q${game.period} ${game.clock}`
     : 'FINAL'
