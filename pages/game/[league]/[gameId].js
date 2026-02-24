@@ -234,12 +234,12 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
             </div>
           )}
 
-          {/* Court Animation */}
-          {plays.length > 0 && (
+          {/* Player Spotlight */}
+          {playerStats.length > 0 && (
             <div style={{ marginTop: 32 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <SectionHead text="LIVE COURT" />
+                  <SectionHead text="PLAYER SPOTLIGHT" />
                   {game.isLive && (
                     <span style={{
                       fontFamily: '"IBM Plex Mono", monospace',
@@ -254,7 +254,6 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
                         width: 5, height: 5, borderRadius: '50%',
                         background: 'var(--live)',
                         display: 'inline-block',
-                        animation: 'pulse 1.5s infinite',
                       }} />
                       LIVE
                     </span>
@@ -280,17 +279,13 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
                 </button>
               </div>
               {showCourt && (
-                <CourtErrorBoundary>
-                  <CourtAnimation
-                    plays={plays}
-                    homeAbbr={game.home.abbr}
-                    awayAbbr={game.away.abbr}
-                    homeLogo={game.home.logo}
-                    awayLogo={game.away.logo}
-                    isLive={game.isLive}
-                    lastUpdated={lastUpdated}
-                  />
-                </CourtErrorBoundary>
+                <PlayerSpotlight
+                  playerStats={playerStats}
+                  homeAbbr={game.home.abbr}
+                  awayAbbr={game.away.abbr}
+                  homeLogo={game.home.logo}
+                  awayLogo={game.away.logo}
+                />
               )}
             </div>
           )}
@@ -535,362 +530,241 @@ function PlayerTable({ teamStats }) {
   )
 }
 
-// Safe string helper - converts anything to a renderable string
-const s = (val) => {
-  if (val === null || val === undefined) return ''
-  if (typeof val === 'object') return JSON.stringify(val)
-  return String(val)
-}
+function PlayerSpotlight({ playerStats, homeAbbr, awayAbbr, homeLogo, awayLogo }) {
+  const [activeIdx, setActiveIdx] = useState(0)
+  const [animating, setAnimating] = useState(false)
+  const [barProgress, setBarProgress] = useState(0)
+  const [autoRotate, setAutoRotate] = useState(true)
+  const rafRef = useRef(null)
+  const autoRef = useRef(null)
 
-class CourtErrorBoundary extends React.Component {
-  constructor(props) { super(props) }
-  state = { error: null }
-  static getDerivedStateFromError(error) { return { error } }
-  render() {
-    if (this.state.error) {
-      return (
-        <div style={{ padding: 20, border: '1px solid var(--border)', borderRadius: 4, fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--live)' }}>
-          ANIMATION ERROR: {this.state.error.message}
-          <div style={{ color: 'var(--muted)', marginTop: 8, fontSize: 10 }}>Check console for details</div>
-        </div>
-      )
+  // Collect all players from both teams, sorted by points
+  const allPlayers = useMemo(() => {
+    const result = []
+    for (const teamData of playerStats) {
+      const teamAbbr = teamData.team?.abbreviation || ''
+      const isHome = teamAbbr === homeAbbr
+      const statistics = teamData.statistics || []
+      const mainStats = statistics.find(s => s.names && s.names.length > 3) || statistics[0]
+      if (!mainStats) continue
+      const names = mainStats.names || []
+      const athletes = mainStats.athletes || teamData.athletes || []
+      const ptsIdx = names.indexOf('PTS')
+      const rebIdx = names.indexOf('REB')
+      const astIdx = names.indexOf('AST')
+      const stlIdx = names.indexOf('STL')
+      const blkIdx = names.indexOf('BLK')
+      const minIdx = names.indexOf('MIN')
+      const fgIdx = names.indexOf('FG')
+
+      for (const a of athletes) {
+        if (a.didNotPlay) continue
+        const stats = a.stats || []
+        const pts = Number(stats[ptsIdx] ?? 0)
+        if (pts === 0 && Number(stats[minIdx] ?? 0) === 0) continue
+        result.push({
+          name: a.athlete?.displayName || '',
+          shortName: a.athlete?.shortName || a.athlete?.displayName || '',
+          headshot: a.athlete?.headshot?.href || null,
+          teamAbbr,
+          isHome,
+          starter: a.starter || false,
+          pts,
+          reb: Number(stats[rebIdx] ?? 0),
+          ast: Number(stats[astIdx] ?? 0),
+          stl: Number(stats[stlIdx] ?? 0),
+          blk: Number(stats[blkIdx] ?? 0),
+          min: String(stats[minIdx] ?? '0'),
+          fg: String(stats[fgIdx] ?? ''),
+        })
+      }
     }
-    return this.props.children
-  }
-}
+    return result.sort((a, b) => b.pts - a.pts).slice(0, 12)
+  }, [playerStats, homeAbbr])
 
-function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive, lastUpdated }) {
-  const [currentPlayIdx, setCurrentPlayIdx] = useState(null)
-  const [particles, setParticles] = useState([])
-  const [autoPlay, setAutoPlay] = useState(isLive)
-  const [speed, setSpeed] = useState(1500)
-  const timerRef = useRef(null)
-  const particleId = useRef(0)
-
-  const scoringPlays = useMemo(() => {
-    const result = plays.filter(p => p.scoringPlay).map(p => ({
-      id: Number(p.id || Math.random()),
-      period: Number(p.period?.number ?? p.period ?? 0),
-      clockDisplay: String(p.clock?.displayValue ?? p.clock ?? ''),
-      awayScore: Number(p.awayScore ?? 0),
-      homeScore: Number(p.homeScore ?? 0),
-      text: String(p.text || p.description || ''),
-      team: String(p.team?.abbreviation || ''),
-      scoringPlay: true,
-    }))
-    if (result.length > 0) {
-      console.log('First scoring play (normalized):', result[0])
+  // Animate bars when player changes
+  const animateBars = useCallback(() => {
+    setBarProgress(0)
+    setAnimating(true)
+    const start = performance.now()
+    const duration = 700
+    const tick = (now) => {
+      const t = Math.min((now - start) / duration, 1)
+      const ease = 1 - Math.pow(1 - t, 3) // ease out cubic
+      setBarProgress(ease)
+      if (t < 1) rafRef.current = requestAnimationFrame(tick)
+      else setAnimating(false)
     }
-    return result
-  }, [plays])
+    rafRef.current = requestAnimationFrame(tick)
+  }, [])
 
-  // Detect play type from description text
-  const getPlayType = (text = '') => {
-    const t = text.toLowerCase()
-    if (t.includes('three') || t.includes('3-pt') || t.includes('3pt')) return '3PT'
-    if (t.includes('free throw') || t.includes('foul shot')) return 'FT'
-    if (t.includes('dunk')) return 'DUNK'
-    if (t.includes('layup') || t.includes('lay up')) return 'LAYUP'
-    if (t.includes('alley')) return 'ALLEY-OOP'
-    if (t.includes('hook')) return 'HOOK'
-    return 'JUMP SHOT'
-  }
-
-  // Estimate shot position from play type and team
-  // Court is 500x270, home basket right side, away basket left side
-  const getShotOrigin = (play, type) => {
-    const isHome = play.team?.abbreviation === homeAbbr
-    const baseX = isHome ? 380 : 120  // which half
-    const jitter = () => (Math.random() - 0.5) * 60
-
-    if (type === '3PT') return { x: baseX + (isHome ? -60 : 60) + jitter(), y: 135 + jitter() * 1.5 }
-    if (type === 'FT') return { x: isHome ? 340 : 160, y: 135 }
-    if (type === 'DUNK' || type === 'LAYUP' || type === 'ALLEY-OOP') return { x: isHome ? 455 : 45, y: 135 + jitter() * 0.3 }
-    return { x: baseX + jitter() * 0.5, y: 135 + jitter() }
-  }
-
-  const getBasketPos = (isHome) => ({ x: isHome ? 472 : 28, y: 135 })
-
-  const firePlay = useCallback((idx) => {
-    if (idx < 0 || idx >= scoringPlays.length) return
-    const play = scoringPlays[idx]
-    const type = getPlayType(play.text)
-    const isHome = play.team?.abbreviation === homeAbbr
-    const origin = getShotOrigin(play, type)
-    const basket = getBasketPos(isHome)
-    const id = ++particleId.current
-
-    setCurrentPlayIdx(idx)
-    setParticles(prev => [...prev.slice(-8), {
-      id, origin, basket, type, isHome,
-      text: String(play.text || ''),
-      awayScore: Number(play.awayScore ?? 0),
-      homeScore: Number(play.homeScore ?? 0),
-      team: String(play.team?.abbreviation || ''),
-      born: Date.now(),
-    }])
-  }, [scoringPlays, homeAbbr])
-
-  // Auto-advance
   useEffect(() => {
-    if (!autoPlay) { clearTimeout(timerRef.current); return }
-    const next = (currentPlayIdx ?? -1) + 1
-    if (next >= scoringPlays.length) { setAutoPlay(false); return }
-    timerRef.current = setTimeout(() => firePlay(next), speed)
-    return () => clearTimeout(timerRef.current)
-  }, [autoPlay, currentPlayIdx, scoringPlays.length, speed, firePlay])
+    animateBars()
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [activeIdx, animateBars])
 
-  // When live data updates, jump to latest
+  // Auto-rotate
   useEffect(() => {
-    if (isLive && scoringPlays.length > 0) {
-      const latest = scoringPlays.length - 1
-      setCurrentPlayIdx(latest)
-      firePlay(latest)
-    }
-  }, [lastUpdated]) // eslint-disable-line
+    if (!autoRotate || allPlayers.length === 0) return
+    autoRef.current = setInterval(() => {
+      setActiveIdx(i => (i + 1) % allPlayers.length)
+    }, 3500)
+    return () => clearInterval(autoRef.current)
+  }, [autoRotate, allPlayers.length])
 
-  const current = currentPlayIdx !== null ? scoringPlays[currentPlayIdx] : null
+  if (allPlayers.length === 0) return (
+    <div style={{ padding: 24, color: 'var(--muted)', fontFamily: '"IBM Plex Mono", monospace', fontSize: 11 }}>
+      NO PLAYER DATA AVAILABLE
+    </div>
+  )
 
-  const W = 500, H = 270
+  const player = allPlayers[activeIdx]
+  const maxPts = Math.max(...allPlayers.map(p => p.pts), 1)
+  const maxReb = Math.max(...allPlayers.map(p => p.reb), 1)
+  const maxAst = Math.max(...allPlayers.map(p => p.ast), 1)
+
+  const statBars = [
+    { label: 'PTS', value: player.pts, max: maxPts, color: 'var(--accent)' },
+    { label: 'REB', value: player.reb, max: maxReb, color: 'var(--nba)' },
+    { label: 'AST', value: player.ast, max: maxAst, color: 'var(--ncaa)' },
+    { label: 'STL', value: player.stl, max: Math.max(...allPlayers.map(p => p.stl), 1), color: '#a855f7' },
+    { label: 'BLK', value: player.blk, max: Math.max(...allPlayers.map(p => p.blk), 1), color: '#f97316' },
+  ]
 
   return (
     <div style={{
       background: 'var(--surface)',
       border: '1px solid var(--border)',
       borderRadius: 6,
-      padding: 24,
-      userSelect: 'none',
+      overflow: 'hidden',
     }}>
-      {/* Current play callout */}
+      {/* Main spotlight card */}
       <div style={{
-        minHeight: 48,
-        marginBottom: 16,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
+        padding: 24,
+        display: 'grid',
+        gridTemplateColumns: 'auto 1fr',
+        gap: 24,
+        borderBottom: '1px solid var(--border)',
       }}>
-        {current ? (
-          <>
-            <div>
-              <div style={{
-                fontFamily: '"IBM Plex Mono", monospace',
-                fontSize: 10,
-                color: String(current.team) === homeAbbr ? 'var(--nba)' : 'var(--ncaa)',
-                letterSpacing: '1px',
-                marginBottom: 4,
-              }}>
-                {String(current.team || '')} · {getPlayType(String(current.text || ''))}
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.4 }}>
-                {String(current.text || '')}
-              </div>
-            </div>
+        {/* Player photo + info */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, minWidth: 80 }}>
+          <div style={{
+            width: 72, height: 72, borderRadius: '50%',
+            background: '#1a1a1a',
+            border: `2px solid ${player.isHome ? 'var(--nba)' : 'var(--ncaa)'}`,
+            overflow: 'hidden',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            {player.headshot ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={player.headshot} alt={player.name} width={72} height={72} style={{ objectFit: 'cover' }} />
+            ) : (
+              <span style={{ fontSize: 28, color: 'var(--border)' }}>?</span>
+            )}
+          </div>
+          <div style={{ textAlign: 'center' }}>
             <div style={{
               fontFamily: '"IBM Plex Mono", monospace',
-              fontSize: 22,
-              fontWeight: 600,
-              color: 'var(--accent)',
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
+              fontSize: 9,
+              color: player.isHome ? 'var(--nba)' : 'var(--ncaa)',
+              letterSpacing: '1px',
             }}>
-              {Number(current.awayScore ?? 0)}–{Number(current.homeScore ?? 0)}
-            </div>          </>
-        ) : (
-          <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--muted)' }}>
-            PRESS PLAY TO REPLAY SCORING PLAYS
+              {player.teamAbbr}
+            </div>
+            {player.starter && (
+              <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 8, color: 'var(--muted)', marginTop: 2 }}>
+                STARTER
+              </div>
+            )}
           </div>
-        )}
+        </div>
+
+        {/* Stats */}
+        <div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)', lineHeight: 1 }}>
+              {player.name}
+            </div>
+            <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+              {player.min} MIN · {player.fg} FG
+            </div>
+          </div>
+
+          {/* Animated stat bars */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {statBars.map(({ label, value, max, color }) => (
+              <div key={label}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)', letterSpacing: '1px' }}>{label}</span>
+                  <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color, fontWeight: 600 }}>{value}</span>
+                </div>
+                <div style={{ height: 4, background: '#1a1a1a', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${(value / max) * barProgress * 100}%`,
+                    background: color,
+                    borderRadius: 2,
+                    transition: 'none',
+                    boxShadow: `0 0 6px ${color}`,
+                  }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* Court SVG */}
-      <div style={{ position: 'relative', borderRadius: 4, overflow: 'hidden' }}>
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ width: '100%', display: 'block', background: '#0d1a0d' }}
-        >
-          {/* Court floor */}
-          <rect x={0} y={0} width={W} height={H} fill="#0d1a0d" />
+      {/* Player selector grid */}
+      <div style={{ padding: '12px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)', letterSpacing: '1px' }}>
+            {activeIdx + 1} / {allPlayers.length}
+          </span>
+          <button
+            onClick={() => setAutoRotate(r => !r)}
+            style={{
+              background: autoRotate ? 'rgba(232,255,71,0.1)' : 'transparent',
+              border: '1px solid',
+              borderColor: autoRotate ? 'var(--accent)' : 'var(--border)',
+              color: autoRotate ? 'var(--accent)' : 'var(--muted)',
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 9,
+              padding: '3px 8px',
+              borderRadius: 3,
+              cursor: 'pointer',
+              letterSpacing: '1px',
+            }}
+          >
+            {autoRotate ? '⏸ AUTO' : '▶ AUTO'}
+          </button>
+        </div>
 
-          {/* Court outline */}
-          <rect x={10} y={10} width={W - 20} height={H - 20}
-            fill="none" stroke="#1a3a1a" strokeWidth={2} rx={4} />
-
-          {/* Half court line */}
-          <line x1={W/2} y1={10} x2={W/2} y2={H - 10} stroke="#1a3a1a" strokeWidth={1.5} />
-
-          {/* Center circle */}
-          <circle cx={W/2} cy={H/2} r={40} fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
-          <circle cx={W/2} cy={H/2} r={4} fill="#1a3a1a" />
-
-          {/* Left paint / key */}
-          <rect x={10} y={H/2 - 60} width={100} height={120}
-            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
-          {/* Left free throw circle */}
-          <path d={`M 110 ${H/2 - 40} A 40 40 0 0 1 110 ${H/2 + 40}`}
-            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
-          {/* Left 3pt arc */}
-          <path d={`M 10 ${H/2 - 90} L 65 ${H/2 - 90} A 100 100 0 0 1 65 ${H/2 + 90} L 10 ${H/2 + 90}`}
-            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
-          {/* Left basket */}
-          <circle cx={28} cy={H/2} r={8} fill="none" stroke="#2a5a2a" strokeWidth={2} />
-          <circle cx={28} cy={H/2} r={2} fill="#2a5a2a" />
-
-          {/* Right paint / key */}
-          <rect x={W - 110} y={H/2 - 60} width={100} height={120}
-            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
-          {/* Right free throw circle */}
-          <path d={`M ${W - 110} ${H/2 - 40} A 40 40 0 0 0 ${W - 110} ${H/2 + 40}`}
-            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
-          {/* Right 3pt arc */}
-          <path d={`M ${W - 10} ${H/2 - 90} L ${W - 65} ${H/2 - 90} A 100 100 0 0 0 ${W - 65} ${H/2 + 90} L ${W - 10} ${H/2 + 90}`}
-            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
-          {/* Right basket */}
-          <circle cx={W - 28} cy={H/2} r={8} fill="none" stroke="#2a5a2a" strokeWidth={2} />
-          <circle cx={W - 28} cy={H/2} r={2} fill="#2a5a2a" />
-
-          {/* Team labels */}
-          <text x={40} y={22} textAnchor="middle" fill="#2a5a2a" fontSize={9}
-            fontFamily="IBM Plex Mono, monospace">{awayAbbr}</text>
-          <text x={W - 40} y={22} textAnchor="middle" fill="#2a5a2a" fontSize={9}
-            fontFamily="IBM Plex Mono, monospace">{homeAbbr}</text>
-
-          {/* Particles — shot arcs */}
-          {particles.map(p => (
-            <ShotParticle key={p.id} particle={p} W={W} H={H} />
-          ))}
-        </svg>
-      </div>
-
-      {/* Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
-        <button onClick={() => { setCurrentPlayIdx(null); setParticles([]); setAutoPlay(false) }} style={ctrlBtn}>⏮</button>
-        <button onClick={() => { const prev = (currentPlayIdx ?? 0) - 1; if (prev >= 0) firePlay(prev) }} style={ctrlBtn}>◀</button>
-        <button
-          onClick={() => {
-            if (currentPlayIdx !== null && currentPlayIdx >= scoringPlays.length - 1) {
-              setCurrentPlayIdx(null)
-              setParticles([])
-              setTimeout(() => setAutoPlay(true), 100)
-            } else {
-              setAutoPlay(p => !p)
-            }
-          }}
-          style={{ ...ctrlBtn, background: autoPlay ? 'var(--live)' : 'var(--accent)', color: '#000', minWidth: 72 }}
-        >
-          {autoPlay ? '⏸ PAUSE' : '▶ PLAY'}
-        </button>
-        <button onClick={() => { const next = (currentPlayIdx ?? -1) + 1; if (next < scoringPlays.length) firePlay(next) }} style={ctrlBtn}>▶</button>
-        <button onClick={() => firePlay(scoringPlays.length - 1)} style={ctrlBtn}>⏭</button>
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>SPEED</span>
-          {[2000, 1200, 600].map((s, i) => (
-            <button key={s} onClick={() => setSpeed(s)} style={{
-              ...ctrlBtn,
-              borderColor: speed === s ? 'var(--accent)' : 'var(--border)',
-              color: speed === s ? 'var(--accent)' : 'var(--muted)',
-              fontSize: 9, padding: '4px 8px',
-            }}>
-              {['1×', '2×', '4×'][i]}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {allPlayers.map((p, i) => (
+            <button
+              key={i}
+              onClick={() => { setActiveIdx(i); setAutoRotate(false) }}
+              style={{
+                background: i === activeIdx ? (p.isHome ? 'var(--nba)' : 'var(--ncaa)') : 'transparent',
+                border: '1px solid',
+                borderColor: i === activeIdx ? 'transparent' : 'var(--border)',
+                color: i === activeIdx ? '#000' : 'var(--muted)',
+                fontFamily: '"IBM Plex Mono", monospace',
+                fontSize: 9,
+                padding: '4px 8px',
+                borderRadius: 3,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                fontWeight: i === activeIdx ? 600 : 400,
+              }}
+            >
+              {p.shortName} <span style={{ opacity: 0.7 }}>{p.pts}</span>
             </button>
           ))}
         </div>
-
-        <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)', marginLeft: 8 }}>
-          {currentPlayIdx !== null ? currentPlayIdx + 1 : 0}/{scoringPlays.length}
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
-        {[
-          { color: 'var(--ncaa)', label: awayAbbr },
-          { color: 'var(--nba)', label: homeAbbr },
-          { color: 'var(--accent)', label: '3PT' },
-          { color: 'var(--live)', label: 'DUNK/LAYUP' },
-        ].map(({ color, label }) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-            <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>{label}</span>
-          </div>
-        ))}
       </div>
     </div>
-  )
-}
-
-function ShotParticle({ particle, W, H }) {
-  const origin = particle.origin
-  const basket = particle.basket
-  const type = String(particle.type || '')
-  const isHome = Boolean(particle.isHome)
-  const [t, setT] = useState(0)
-  const rafRef = useRef(null)
-  const duration = 900
-
-  useEffect(() => {
-    const start = performance.now()
-    const animate = (now) => {
-      const elapsed = now - start
-      const progress = Math.min(elapsed / duration, 1)
-      setT(progress)
-      if (progress < 1) rafRef.current = requestAnimationFrame(animate)
-    }
-    rafRef.current = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [])
-
-  // Ease in-out
-  const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
-  const x = origin.x + (basket.x - origin.x) * ease
-  // Parabolic arc — peaks in the middle
-  const arcHeight = type === '3PT' ? 70 : type === 'FT' ? 60 : 45
-  const y = origin.y + (basket.y - origin.y) * ease - Math.sin(ease * Math.PI) * arcHeight
-
-  const opacity = t > 0.85 ? 1 - (t - 0.85) / 0.15 : 1
-  const size = t > 0.8 ? 6 + (1 - t) * 20 : 6
-
-  const color = type === '3PT' ? 'var(--accent)'
-    : type === 'DUNK' || type === 'LAYUP' || type === 'ALLEY-OOP' ? 'var(--live)'
-    : isHome ? 'var(--nba)' : 'var(--ncaa)'
-
-  // Trail dots
-  const trail = [0.15, 0.3, 0.45].map((offset) => {
-    const tp = Math.max(0, ease - offset)
-    const tx = origin.x + (basket.x - origin.x) * tp
-    const ty = origin.y + (basket.y - origin.y) * tp - Math.sin(tp * Math.PI) * arcHeight
-    return { tx, ty, opacity: opacity * (1 - offset / 0.5) * 0.4 }
-  })
-
-  if (t === 0) return null
-
-  return (
-    <g>
-      {/* Trail */}
-      {trail.map((tr, i) => (
-        <circle key={i} cx={tr.tx} cy={tr.ty} r={3} fill={color} opacity={tr.opacity} />
-      ))}
-      {/* Main ball */}
-      <circle cx={x} cy={y} r={size / 2} fill={color} opacity={opacity} />
-      {/* Glow */}
-      <circle cx={x} cy={y} r={size} fill={color} opacity={opacity * 0.15} />
-      {/* Points burst at basket */}
-      {t > 0.85 && (
-        <text
-          x={basket.x}
-          y={basket.y - 10 - (t - 0.85) * 80}
-          textAnchor="middle"
-          fill={color}
-          fontSize={12}
-          fontFamily="IBM Plex Mono, monospace"
-          fontWeight={600}
-          opacity={1 - (t - 0.85) / 0.15}
-        >
-          {type === '3PT' ? '+3' : type === 'FT' ? '+1' : '+2'}
-        </text>
-      )}
-    </g>
   )
 }
 
