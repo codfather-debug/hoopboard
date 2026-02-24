@@ -77,7 +77,7 @@ export default function GamePage({ game, summary, league, debugInfo }) {
               letterSpacing: '2px',
               marginBottom: 24,
             }}>
-              {game.isLive ? `LIVE · Q${game.period} ${game.clock}` : game.statusText}
+              {game.isLive ? `LIVE · ${game.period > 0 ? `Q${game.period} ${game.clock}` : game.clock || 'STARTING'}` : game.statusText}
             </div>
 
             {/* Teams */}
@@ -275,44 +275,34 @@ function SectionHead({ text }) {
 function LeadersTable({ leaders }) {
   const allLeaders = []
 
-  for (const cat of leaders) {
-    const catName = cat.name || cat.shortDisplayName || cat.displayName || ''
-
-    // ESPN wraps leaders in a "leaders" array inside each category
-    const leadersList = cat.leaders || []
-
-    for (const entry of leadersList) {
-      const athlete = entry.athlete || entry
-      const name = athlete?.displayName || athlete?.fullName || ''
-      if (!name) continue
-
-      allLeaders.push({
-        name,
-        team: athlete?.team?.abbreviation || '',
-        stat: catName,
-        value: entry.displayValue || entry.value || '',
-        headshot: athlete?.headshot?.href || null,
-      })
+  // ESPN structure: leaders = [{team, leaders: [{displayName, leaders: [{athlete, displayValue}]}]}]
+  for (const teamEntry of leaders) {
+    const teamAbbr = teamEntry.team?.abbreviation || ''
+    for (const cat of (teamEntry.leaders || [])) {
+      const catName = cat.displayName || cat.name || ''
+      for (const entry of (cat.leaders || [])) {
+        const athlete = entry.athlete || {}
+        const name = athlete.displayName || ''
+        if (!name) continue
+        allLeaders.push({
+          name,
+          team: teamAbbr,
+          stat: catName,
+          value: entry.displayValue || '',
+          headshot: athlete.headshot?.href || null,
+        })
+      }
     }
   }
 
   if (allLeaders.length === 0) return (
-    <div style={{
-      padding: '20px 0',
-      color: 'var(--muted)',
-      fontFamily: '"IBM Plex Mono", monospace',
-      fontSize: 11,
-    }}>
+    <div style={{ padding: '20px 0', color: 'var(--muted)', fontFamily: '"IBM Plex Mono", monospace', fontSize: 11 }}>
       NO LEADER DATA AVAILABLE
     </div>
   )
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-      gap: 8,
-    }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
       {allLeaders.map((l, i) => (
         <div key={i} style={{
           background: 'var(--surface)',
@@ -344,16 +334,14 @@ function LeadersTable({ leaders }) {
 function PlayerTable({ teamStats }) {
   const teamName = teamStats.team?.displayName || teamStats.team?.abbreviation || ''
   const statistics = teamStats.statistics || []
+  const athletes = teamStats.athletes || []
 
-  // ESPN boxscore: statistics is an array of stat categories, each with names[] and athletes[]
-  // We want to find the main stats block which has multiple columns
+  // ESPN structure: statistics[0].names has column headers, athletes[] has player rows
   const mainStats = statistics.find(s => s.names && s.names.length > 3) || statistics[0]
-  if (!mainStats) return null
+  if (!mainStats || athletes.length === 0) return null
 
   const colNames = mainStats.names || []
-  const athletes = mainStats.athletes || []
-
-  const wantedCols = ['MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'FG%']
+  const wantedCols = ['MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO']
   const colIndices = wantedCols.map(c => colNames.indexOf(c)).filter(i => i !== -1)
   const colLabels = colIndices.map(i => colNames[i])
 
