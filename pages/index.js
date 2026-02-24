@@ -3,11 +3,47 @@ import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { getNBAScoreboard, getNCAA_MBScoreboard, parseGame } from '../lib/espn'
 
-export default function Home({ nbaGames, ncaaGames, fetchedAt }) {
+export default function Home({ nbaGames, ncaaGames, fetchedAt, dateStr }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
   const now = new Date(fetchedAt)
   const timeStr = mounted ? now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''
+
+  // Date navigation helpers
+  const getDateLabel = () => {
+    if (!mounted) return ''
+    if (!dateStr) return 'TODAY'
+    const d = new Date(
+      parseInt(dateStr.slice(0,4)),
+      parseInt(dateStr.slice(4,6)) - 1,
+      parseInt(dateStr.slice(6,8))
+    )
+    const today = new Date()
+    today.setHours(0,0,0,0)
+    const diff = Math.round((d - today) / 86400000)
+    if (diff === -1) return 'YESTERDAY'
+    if (diff === 1) return 'TOMORROW'
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()
+  }
+
+  const shiftDate = (days) => {
+    const base = dateStr
+      ? new Date(
+          parseInt(dateStr.slice(0,4)),
+          parseInt(dateStr.slice(4,6)) - 1,
+          parseInt(dateStr.slice(6,8))
+        )
+      : new Date()
+    base.setDate(base.getDate() + days)
+    const y = base.getFullYear()
+    const m = String(base.getMonth() + 1).padStart(2, '0')
+    const d = String(base.getDate()).padStart(2, '0')
+    const newDate = `${y}${m}${d}`
+    // Check if it's today — if so, remove date param
+    const today = new Date()
+    const todayStr = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`
+    return newDate === todayStr ? '/' : `/?date=${newDate}`
+  }
 
   return (
     <>
@@ -42,6 +78,39 @@ export default function Home({ nbaGames, ncaaGames, fetchedAt }) {
               NBA + NCAA MEN'S
             </span>
           </div>
+
+          {/* Date navigation */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Link href={mounted ? shiftDate(-1) : '#'} style={{
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 11,
+              color: 'var(--muted)',
+              textDecoration: 'none',
+              padding: '4px 8px',
+              border: '1px solid var(--border)',
+              borderRadius: 3,
+            }}>◀</Link>
+            <span style={{
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 11,
+              color: 'var(--text)',
+              minWidth: 90,
+              textAlign: 'center',
+              letterSpacing: '1px',
+            }}>
+              {mounted ? getDateLabel() : ''}
+            </span>
+            <Link href={mounted ? shiftDate(1) : '#'} style={{
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 11,
+              color: 'var(--muted)',
+              textDecoration: 'none',
+              padding: '4px 8px',
+              border: '1px solid var(--border)',
+              borderRadius: 3,
+            }}>▶</Link>
+          </div>
+
           <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: '"IBM Plex Mono", monospace' }}>
             UPDATED {timeStr} · <RefreshLink />
           </div>
@@ -313,11 +382,13 @@ function TeamRow({ team, hasScore, wins }) {
   )
 }
 
-export async function getServerSideProps() {
+export async function getServerSideProps({ query }) {
+  const dateStr = query.date || null // expects YYYYMMDD
+
   try {
     const [nbaRaw, ncaaRaw] = await Promise.all([
-      getNBAScoreboard(),
-      getNCAA_MBScoreboard(),
+      getNBAScoreboard(dateStr),
+      getNCAA_MBScoreboard(dateStr),
     ])
 
     const nbaGames = nbaRaw.map(e => parseGame(e, 'nba')).filter(Boolean)
@@ -328,12 +399,13 @@ export async function getServerSideProps() {
         nbaGames,
         ncaaGames,
         fetchedAt: new Date().toISOString(),
+        dateStr: dateStr || null,
       }
     }
   } catch (err) {
     console.error(err)
     return {
-      props: { nbaGames: [], ncaaGames: [], fetchedAt: new Date().toISOString() }
+      props: { nbaGames: [], ncaaGames: [], fetchedAt: new Date().toISOString(), dateStr: null }
     }
   }
 }
