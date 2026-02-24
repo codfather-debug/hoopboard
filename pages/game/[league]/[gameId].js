@@ -1,6 +1,6 @@
 import Head from 'next/head'
 import Link from 'next/link'
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
 
 export default function GamePage({ game: initialGame, summary: initialSummary, league, debugInfo }) {
@@ -280,15 +280,17 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
                 </button>
               </div>
               {showCourt && (
-                <CourtAnimation
-                  plays={plays}
-                  homeAbbr={game.home.abbr}
-                  awayAbbr={game.away.abbr}
-                  homeLogo={game.home.logo}
-                  awayLogo={game.away.logo}
-                  isLive={game.isLive}
-                  lastUpdated={lastUpdated}
-                />
+                <CourtErrorBoundary>
+                  <CourtAnimation
+                    plays={plays}
+                    homeAbbr={game.home.abbr}
+                    awayAbbr={game.away.abbr}
+                    homeLogo={game.home.logo}
+                    awayLogo={game.away.logo}
+                    isLive={game.isLive}
+                    lastUpdated={lastUpdated}
+                  />
+                </CourtErrorBoundary>
               )}
             </div>
           )}
@@ -533,6 +535,30 @@ function PlayerTable({ teamStats }) {
   )
 }
 
+// Safe string helper - converts anything to a renderable string
+const s = (val) => {
+  if (val === null || val === undefined) return ''
+  if (typeof val === 'object') return JSON.stringify(val)
+  return String(val)
+}
+
+class CourtErrorBoundary extends React.Component {
+  constructor(props) { super(props) }
+  state = { error: null }
+  static getDerivedStateFromError(error) { return { error } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 20, border: '1px solid var(--border)', borderRadius: 4, fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--live)' }}>
+          ANIMATION ERROR: {this.state.error.message}
+          <div style={{ color: 'var(--muted)', marginTop: 8, fontSize: 10 }}>Check console for details</div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive, lastUpdated }) {
   const [currentPlayIdx, setCurrentPlayIdx] = useState(null)
   const [particles, setParticles] = useState([])
@@ -541,19 +567,22 @@ function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive,
   const timerRef = useRef(null)
   const particleId = useRef(0)
 
-  // Only scoring plays
-  const scoringPlays = useMemo(() =>
-    plays.filter(p => p.scoringPlay).map(p => ({
-      ...p,
-      // Normalize period to always be a number
-      period: p.period?.number ?? p.period ?? 0,
-      // Normalize clock to always be a string
-      clockDisplay: p.clock?.displayValue ?? p.clock ?? '',
-      // Normalize scores to numbers
+  const scoringPlays = useMemo(() => {
+    const result = plays.filter(p => p.scoringPlay).map(p => ({
+      id: Number(p.id || Math.random()),
+      period: Number(p.period?.number ?? p.period ?? 0),
+      clockDisplay: String(p.clock?.displayValue ?? p.clock ?? ''),
       awayScore: Number(p.awayScore ?? 0),
       homeScore: Number(p.homeScore ?? 0),
-    })),
-  [plays])
+      text: String(p.text || p.description || ''),
+      team: String(p.team?.abbreviation || ''),
+      scoringPlay: true,
+    }))
+    if (result.length > 0) {
+      console.log('First scoring play (normalized):', result[0])
+    }
+    return result
+  }, [plays])
 
   // Detect play type from description text
   const getPlayType = (text = '') => {
@@ -594,10 +623,10 @@ function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive,
     setCurrentPlayIdx(idx)
     setParticles(prev => [...prev.slice(-8), {
       id, origin, basket, type, isHome,
-      text: play.text || '',
-      away: play.awayScore,
-      home: play.homeScore,
-      team: play.team?.abbreviation || '',
+      text: String(play.text || ''),
+      awayScore: Number(play.awayScore ?? 0),
+      homeScore: Number(play.homeScore ?? 0),
+      team: String(play.team?.abbreviation || ''),
       born: Date.now(),
     }])
   }, [scoringPlays, homeAbbr])
@@ -647,14 +676,14 @@ function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive,
               <div style={{
                 fontFamily: '"IBM Plex Mono", monospace',
                 fontSize: 10,
-                color: current.team === homeAbbr ? 'var(--nba)' : 'var(--ncaa)',
+                color: String(current.team) === homeAbbr ? 'var(--nba)' : 'var(--ncaa)',
                 letterSpacing: '1px',
                 marginBottom: 4,
               }}>
-                {current.team} · {getPlayType(current.text)}
+                {String(current.team || '')} · {getPlayType(String(current.text || ''))}
               </div>
               <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.4 }}>
-                {current.text}
+                {String(current.text || '')}
               </div>
             </div>
             <div style={{
@@ -665,7 +694,7 @@ function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive,
               whiteSpace: 'nowrap',
               flexShrink: 0,
             }}>
-              {current.awayScore}–{current.homeScore}
+              {Number(current.awayScore ?? 0)}–{Number(current.homeScore ?? 0)}
             </div>          </>
         ) : (
           <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--muted)' }}>
@@ -792,7 +821,10 @@ function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive,
 }
 
 function ShotParticle({ particle, W, H }) {
-  const { origin, basket, type, isHome, born } = particle
+  const origin = particle.origin
+  const basket = particle.basket
+  const type = String(particle.type || '')
+  const isHome = Boolean(particle.isHome)
   const [t, setT] = useState(0)
   const rafRef = useRef(null)
   const duration = 900
