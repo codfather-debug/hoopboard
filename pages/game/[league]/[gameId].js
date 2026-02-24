@@ -254,25 +254,36 @@ function LeadersTable({ leaders }) {
   const allLeaders = []
 
   for (const cat of leaders) {
-    // ESPN nests leaders differently — handle both structures
-    const catName = cat.name || cat.shortDisplayName || ''
-    const leadersList = cat.leaders || cat.athletes || []
-    for (const leader of leadersList) {
-      // Sometimes the athlete is nested under .athlete, sometimes it's flat
-      const athlete = leader.athlete || leader
-      const displayValue = leader.displayValue || leader.value || ''
-      if (!athlete?.displayName) continue
+    const catName = cat.name || cat.shortDisplayName || cat.displayName || ''
+
+    // ESPN wraps leaders in a "leaders" array inside each category
+    const leadersList = cat.leaders || []
+
+    for (const entry of leadersList) {
+      const athlete = entry.athlete || entry
+      const name = athlete?.displayName || athlete?.fullName || ''
+      if (!name) continue
+
       allLeaders.push({
-        name: athlete.displayName || '',
-        team: athlete.team?.abbreviation || athlete.teamAbbrev || '',
+        name,
+        team: athlete?.team?.abbreviation || '',
         stat: catName,
-        value: displayValue,
-        headshot: athlete.headshot?.href || athlete.headshot || null,
+        value: entry.displayValue || entry.value || '',
+        headshot: athlete?.headshot?.href || null,
       })
     }
   }
 
-  if (allLeaders.length === 0) return null
+  if (allLeaders.length === 0) return (
+    <div style={{
+      padding: '20px 0',
+      color: 'var(--muted)',
+      fontFamily: '"IBM Plex Mono", monospace',
+      fontSize: 11,
+    }}>
+      NO LEADER DATA AVAILABLE
+    </div>
+  )
 
   return (
     <div style={{
@@ -296,17 +307,8 @@ function LeadersTable({ leaders }) {
           )}
           <div>
             <div style={{ fontSize: 12, fontWeight: 500 }}>{l.name}</div>
-            <div style={{
-              fontSize: 10,
-              fontFamily: '"IBM Plex Mono", monospace',
-              color: 'var(--muted)',
-            }}>{l.team}</div>
-            <div style={{
-              fontFamily: '"IBM Plex Mono", monospace',
-              fontSize: 11,
-              color: 'var(--accent)',
-              marginTop: 2,
-            }}>
+            <div style={{ fontSize: 10, fontFamily: '"IBM Plex Mono", monospace', color: 'var(--muted)' }}>{l.team}</div>
+            <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--accent)', marginTop: 2 }}>
               {l.value} {(l.stat || '').toUpperCase()}
             </div>
           </div>
@@ -315,6 +317,7 @@ function LeadersTable({ leaders }) {
     </div>
   )
 }
+
 
 function PlayerTable({ teamStats }) {
   const teamName = teamStats.team?.displayName || teamStats.team?.abbreviation || ''
