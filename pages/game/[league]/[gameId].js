@@ -22,7 +22,7 @@ export default function GamePage({ game, summary, league }) {
   // Parse player stats from summary
   const boxscore = summary?.boxscore
   const playerStats = boxscore?.players || []
-  const leaders = summary?.leaders || []
+  const leaders = summary?.leaders || summary?.seasonseries?.[0]?.leaders || []
 
   return (
     <>
@@ -254,14 +254,20 @@ function LeadersTable({ leaders }) {
   const allLeaders = []
 
   for (const cat of leaders) {
-    const catName = cat.name
-    for (const leader of (cat.leaders || [])) {
+    // ESPN nests leaders differently — handle both structures
+    const catName = cat.name || cat.shortDisplayName || ''
+    const leadersList = cat.leaders || cat.athletes || []
+    for (const leader of leadersList) {
+      // Sometimes the athlete is nested under .athlete, sometimes it's flat
+      const athlete = leader.athlete || leader
+      const displayValue = leader.displayValue || leader.value || ''
+      if (!athlete?.displayName) continue
       allLeaders.push({
-        name: leader.athlete?.displayName || '',
-        team: leader.athlete?.team?.abbreviation || '',
+        name: athlete.displayName || '',
+        team: athlete.team?.abbreviation || athlete.teamAbbrev || '',
         stat: catName,
-        value: leader.displayValue || '',
-        headshot: leader.athlete?.headshot?.href || null,
+        value: displayValue,
+        headshot: athlete.headshot?.href || athlete.headshot || null,
       })
     }
   }
@@ -312,11 +318,16 @@ function LeadersTable({ leaders }) {
 
 function PlayerTable({ teamStats }) {
   const teamName = teamStats.team?.displayName || teamStats.team?.abbreviation || ''
-  const stats = teamStats.statistics || []
-  const colNames = stats[0]?.names || []
-  const athletes = teamStats.athletes || []
+  const statistics = teamStats.statistics || []
 
-  // Simplified: only show key columns
+  // ESPN boxscore: statistics is an array of stat categories, each with names[] and athletes[]
+  // We want to find the main stats block which has multiple columns
+  const mainStats = statistics.find(s => s.names && s.names.length > 3) || statistics[0]
+  if (!mainStats) return null
+
+  const colNames = mainStats.names || []
+  const athletes = mainStats.athletes || []
+
   const wantedCols = ['MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'FG%']
   const colIndices = wantedCols.map(c => colNames.indexOf(c)).filter(i => i !== -1)
   const colLabels = colIndices.map(i => colNames[i])
@@ -399,7 +410,14 @@ export async function getServerSideProps({ params }) {
 
     try {
       const res = await fetch(`${ESPN_BASE}/${leaguePath}/summary?event=${gameId}`)
-      if (res.ok) summary = await res.json()
+      if (res.ok) {
+        summary = await res.json()
+        // Debug: log top-level keys so we can see structure
+        console.log('Summary keys:', Object.keys(summary))
+        console.log('Boxscore keys:', summary.boxscore ? Object.keys(summary.boxscore) : 'no boxscore')
+        console.log('Players sample:', JSON.stringify(summary.boxscore?.players?.[0])?.slice(0, 300))
+        console.log('Leaders sample:', JSON.stringify(summary.leaders?.[0])?.slice(0, 300))
+      }
     } catch (e) {
       // summary not available
     }
