@@ -4,33 +4,33 @@ const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/basketball'
 
 export default async function handler(req, res) {
   const { league, gameId } = req.query
-
-  if (!league || !gameId) {
-    return res.status(400).json({ error: 'Missing league or gameId' })
-  }
+  if (!league || !gameId) return res.status(400).json({ error: 'Missing params' })
 
   try {
-    const [raw, summaryRes] = await Promise.all([
-      league === 'nba' ? getNBAScoreboard() : getNCAA_MBScoreboard(),
-      fetch(`${ESPN_BASE}/${league === 'nba' ? 'nba' : 'mens-college-basketball'}/summary?event=${gameId}`),
+    const [nbaRaw, ncaaRaw] = await Promise.all([
+      getNBAScoreboard(),
+      getNCAA_MBScoreboard(),
     ])
 
-    const eventRaw = raw.find(e => e.id === gameId)
+    const allRaw = league === 'nba' ? nbaRaw : ncaaRaw
+    const eventRaw = allRaw.find(e => e.id === gameId)
     const game = eventRaw ? parseGame(eventRaw, league) : null
 
-    let plays = []
-    let leaders = []
-    let playerStats = []
+    const leaguePath = league === 'nba' ? 'nba' : 'mens-college-basketball'
+    let plays = [], leaders = [], playerStats = []
 
-    if (summaryRes.ok) {
-      const summary = await summaryRes.json()
-      plays = summary.plays || []
-      leaders = summary.leaders || []
-      playerStats = summary.boxscore?.players || []
-    }
+    try {
+      const summaryRes = await fetch(`${ESPN_BASE}/${leaguePath}/summary?event=${gameId}`)
+      if (summaryRes.ok) {
+        const summary = await summaryRes.json()
+        plays = summary.plays || []
+        leaders = summary.leaders || []
+        playerStats = summary.boxscore?.players || []
+      }
+    } catch (e) { /* silent */ }
 
-    res.setHeader('Cache-Control', 'no-store')
-    return res.status(200).json({ game, plays, leaders, playerStats })
+    res.setHeader('Cache-Control', 's-maxage=25, stale-while-revalidate')
+    return res.json({ game, plays, leaders, playerStats })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed to fetch game data' })
