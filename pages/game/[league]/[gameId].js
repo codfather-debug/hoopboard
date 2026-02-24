@@ -543,7 +543,16 @@ function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive,
 
   // Only scoring plays
   const scoringPlays = useMemo(() =>
-    plays.filter(p => p.scoringPlay),
+    plays.filter(p => p.scoringPlay).map(p => ({
+      ...p,
+      // Normalize period to always be a number
+      period: p.period?.number ?? p.period ?? 0,
+      // Normalize clock to always be a string
+      clockDisplay: p.clock?.displayValue ?? p.clock ?? '',
+      // Normalize scores to numbers
+      awayScore: Number(p.awayScore ?? 0),
+      homeScore: Number(p.homeScore ?? 0),
+    })),
   [plays])
 
   // Detect play type from description text
@@ -657,8 +666,7 @@ function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive,
               flexShrink: 0,
             }}>
               {current.awayScore}–{current.homeScore}
-            </div>
-          </>
+            </div>          </>
         ) : (
           <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--muted)' }}>
             PRESS PLAY TO REPLAY SCORING PLAYS
@@ -864,11 +872,11 @@ function MomentumTracker({ plays, homeName, awayName, homeAbbr, awayAbbr, homeSc
     const result = [{ away: 0, home: 0, label: 'START', text: '', period: 1 }]
     for (const play of plays) {
       if (!play.scoringPlay) continue
-      const away = play.awayScore ?? result[result.length - 1].away
-      const home = play.homeScore ?? result[result.length - 1].home
-      const period = play.period?.number || play.period || 1
+      const away = Number(play.awayScore ?? result[result.length - 1].away)
+      const home = Number(play.homeScore ?? result[result.length - 1].home)
+      const period = play.period?.number ?? play.period ?? 1
       const periodLabel = period > 4 ? `OT${period - 4}` : `Q${period}`
-      const clock = play.clock?.displayValue || ''
+      const clock = play.clock?.displayValue ?? play.clock ?? ''
       const team = play.team?.abbreviation || ''
       const text = play.text || play.description || ''
       result.push({ away, home, label: `${periodLabel} ${clock}`, text, team, period })
@@ -1133,10 +1141,10 @@ function PlayByPlay({ plays, homeAbbr, awayAbbr }) {
   // ESPN plays are oldest-first, we want newest-first
   const reversed = [...plays].reverse()
 
-  // Group by period
+  // Group by period — normalize period to number first
   const periods = {}
   for (const play of reversed) {
-    const p = play.period?.number || play.period || 0
+    const p = (play.period?.number ?? play.period ?? 0)
     const label = p === 0 ? 'PRE' : p > 4 ? `OT${p - 4}` : `Q${p}`
     if (!periods[label]) periods[label] = []
     periods[label].push(play)
@@ -1196,10 +1204,10 @@ function PlayByPlay({ plays, homeAbbr, awayAbbr }) {
               const isHome = teamAbbr === homeAbbr
               const isAway = teamAbbr === awayAbbr
               const isScoring = play.scoringPlay
-              const clock = play.clock?.displayValue || ''
+              const clock = play.clock?.displayValue || play.clock || ''
               const description = play.text || play.description || ''
-              const awayScore = play.awayScore ?? null
-              const homeScore = play.homeScore ?? null
+              const awayScore = Number(play.awayScore ?? 0)
+              const homeScore = Number(play.homeScore ?? 0)
               const athlete = play.participants?.[0]?.athlete
 
               return (
