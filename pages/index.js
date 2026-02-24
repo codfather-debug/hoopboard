@@ -193,7 +193,7 @@ function GameCard({ game, league }) {
   const timeDisplay = game.isScheduled
     ? (mounted ? new Date(game.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '')
     : game.isLive
-    ? game.period > 0 ? `Q${game.period} ${game.clock}` : (game.clock || 'LIVE')
+    ? game.period > 0 ? `Q${game.period} ${game.clock}` : (game.statusText || 'LIVE')
     : 'FINAL'
 
   return (

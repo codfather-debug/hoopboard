@@ -77,7 +77,7 @@ export default function GamePage({ game, summary, league, debugInfo }) {
               letterSpacing: '2px',
               marginBottom: 24,
             }}>
-              {game.isLive ? `LIVE · ${game.period > 0 ? `Q${game.period} ${game.clock}` : game.clock || 'STARTING'}` : game.statusText}
+              {game.isLive ? `LIVE · ${game.period > 0 ? `Q${game.period} ${game.clock}` : game.statusText || 'IN PROGRESS'}` : game.statusText}
             </div>
 
             {/* Teams */}
@@ -334,13 +334,16 @@ function LeadersTable({ leaders }) {
 function PlayerTable({ teamStats }) {
   const teamName = teamStats.team?.displayName || teamStats.team?.abbreviation || ''
   const statistics = teamStats.statistics || []
-  const athletes = teamStats.athletes || []
 
-  // ESPN structure: statistics[0].names has column headers, athletes[] has player rows
+  // ESPN structure: athletes and column names are both inside statistics[0]
   const mainStats = statistics.find(s => s.names && s.names.length > 3) || statistics[0]
-  if (!mainStats || athletes.length === 0) return null
+  if (!mainStats) return null
 
   const colNames = mainStats.names || []
+  // Athletes live inside the statistics block, not at top level
+  const athletes = mainStats.athletes || teamStats.athletes || []
+  if (athletes.length === 0) return null
+
   const wantedCols = ['MIN', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO']
   const colIndices = wantedCols.map(c => colNames.indexOf(c)).filter(i => i !== -1)
   const colLabels = colIndices.map(i => colNames[i])
