@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     const game = eventRaw ? parseGame(eventRaw, league) : null
 
     const leaguePath = league === 'nba' ? 'nba' : 'mens-college-basketball'
-    let plays = [], leaders = [], playerStats = []
+    let plays = [], leaders = [], playerStats = [], linescores = []
 
     try {
       const summaryRes = await fetch(`${ESPN_BASE}/${leaguePath}/summary?event=${gameId}`)
@@ -26,11 +26,12 @@ export default async function handler(req, res) {
         plays = summary.plays || []
         leaders = summary.leaders || []
         playerStats = summary.boxscore?.players || []
+        linescores = summary.header?.competitions?.[0]?.competitors || []
       }
     } catch (e) { /* silent */ }
 
     res.setHeader('Cache-Control', 's-maxage=25, stale-while-revalidate')
-    return res.json({ game, plays, leaders, playerStats })
+    return res.json({ game, plays, leaders, playerStats, linescores })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed to fetch game data' })

@@ -8,10 +8,12 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
   const [showPlays, setShowPlays] = useState(false)
   const [showMomentum, setShowMomentum] = useState(false)
   const [showCourt, setShowCourt] = useState(false)
+  const [showBoxScore, setShowBoxScore] = useState(false)
   const [game, setGame] = useState(initialGame)
   const [plays, setPlays] = useState(initialSummary?.plays || [])
   const [leaders, setLeaders] = useState(initialSummary?.leaders || [])
   const [playerStats, setPlayerStats] = useState(initialSummary?.boxscore?.players || [])
+  const [linescores, setLinescores] = useState(initialSummary?.header?.competitions?.[0]?.competitors || [])
   const [lastUpdated, setLastUpdated] = useState(null)
 
   useEffect(() => setMounted(true), [])
@@ -28,6 +30,7 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
         if (data.plays) setPlays(data.plays)
         if (data.leaders) setLeaders(data.leaders)
         if (data.playerStats) setPlayerStats(data.playerStats)
+        if (data.linescores) setLinescores(data.linescores)
         setLastUpdated(new Date())
       } catch (e) { /* silent */ }
     }
@@ -158,11 +161,39 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
             </div>
           )}
 
+          {/* Quarter Scores */}
+          {linescores.length > 0 && hasScore && (
+            <div style={{ marginTop: 32 }}>
+              <SectionHead text="QUARTER SCORES" />
+              <QuarterScores competitors={linescores} homeAbbr={game.home.abbr} awayAbbr={game.away.abbr} />
+            </div>
+          )}
+
           {/* Box Score */}
           {playerStats.length > 0 && (
             <div style={{ marginTop: 32 }}>
-              <SectionHead text="BOX SCORE" />
-              {playerStats.map((teamStats, ti) => (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <SectionHead text="BOX SCORE" />
+                <button
+                  onClick={() => setShowBoxScore(p => !p)}
+                  style={{
+                    background: showBoxScore ? 'var(--accent)' : 'transparent',
+                    border: '1px solid',
+                    borderColor: showBoxScore ? 'var(--accent)' : 'var(--border)',
+                    color: showBoxScore ? '#000' : 'var(--muted)',
+                    fontFamily: '"IBM Plex Mono", monospace',
+                    fontSize: 10,
+                    letterSpacing: '1px',
+                    padding: '5px 12px',
+                    borderRadius: 3,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {showBoxScore ? 'HIDE' : 'SHOW'}
+                </button>
+              </div>
+              {showBoxScore && playerStats.map((teamStats, ti) => (
                 <PlayerTable key={ti} teamStats={teamStats} />
               ))}
             </div>
@@ -455,6 +486,75 @@ function LeadersTable({ leaders }) {
   )
 }
 
+
+function QuarterScores({ competitors, homeAbbr, awayAbbr }) {
+  const home = competitors.find(c => c.homeAway === 'home')
+  const away = competitors.find(c => c.homeAway === 'away')
+  if (!home || !away) return null
+
+  const homeScores = home.linescores || []
+  const awayScores = away.linescores || []
+  const numPeriods = Math.max(homeScores.length, awayScores.length)
+  if (numPeriods === 0) return null
+
+  const headers = Array.from({ length: numPeriods }, (_, i) =>
+    i < 4 ? `Q${i + 1}` : `OT${i - 3}`
+  )
+
+  const cellStyle = {
+    textAlign: 'right',
+    padding: '9px 14px',
+    fontFamily: '"IBM Plex Mono", monospace',
+    fontSize: 12,
+    color: 'var(--text)',
+  }
+  const headStyle = {
+    textAlign: 'right',
+    padding: '6px 14px',
+    fontFamily: '"IBM Plex Mono", monospace',
+    fontSize: 9,
+    color: 'var(--muted)',
+    letterSpacing: '1px',
+    fontWeight: 500,
+  }
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+            <th style={{ ...headStyle, textAlign: 'left' }}>TEAM</th>
+            {headers.map(h => <th key={h} style={headStyle}>{h}</th>)}
+            <th style={{ ...headStyle, color: 'var(--text)' }}>TOT</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[
+            { abbr: awayAbbr, scores: awayScores, total: away.score },
+            { abbr: homeAbbr, scores: homeScores, total: home.score },
+          ].map(({ abbr, scores, total }) => (
+            <tr key={abbr} style={{ borderBottom: '1px solid var(--border)' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <td style={{ ...cellStyle, textAlign: 'left', color: 'var(--muted)', letterSpacing: '1px', fontSize: 10 }}>
+                {abbr}
+              </td>
+              {Array.from({ length: numPeriods }, (_, i) => (
+                <td key={i} style={cellStyle}>
+                  {scores[i]?.value ?? '—'}
+                </td>
+              ))}
+              <td style={{ ...cellStyle, fontWeight: 600, color: 'var(--accent)' }}>
+                {total ?? '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 function PlayerTable({ teamStats }) {
   const teamName = teamStats.team?.displayName || teamStats.team?.abbreviation || ''
