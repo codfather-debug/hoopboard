@@ -1,11 +1,12 @@
 import Head from 'next/head'
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
 
 export default function GamePage({ game, summary, league, debugInfo }) {
   const [mounted, setMounted] = useState(false)
   const [showPlays, setShowPlays] = useState(false)
+  const [showMomentum, setShowMomentum] = useState(false)
   useEffect(() => setMounted(true), [])
 
   if (!game) {
@@ -171,6 +172,44 @@ export default function GamePage({ game, summary, league, debugInfo }) {
                 </button>
               </div>
               {showPlays && <PlayByPlay plays={plays} homeAbbr={game.home.abbr} awayAbbr={game.away.abbr} />}
+            </div>
+          )}
+
+          {/* Momentum Tracker */}
+          {plays.length > 0 && (
+            <div style={{ marginTop: 32 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <SectionHead text="MOMENTUM" />
+                <button
+                  onClick={() => setShowMomentum(p => !p)}
+                  style={{
+                    background: showMomentum ? 'var(--accent)' : 'transparent',
+                    border: '1px solid',
+                    borderColor: showMomentum ? 'var(--accent)' : 'var(--border)',
+                    color: showMomentum ? '#000' : 'var(--muted)',
+                    fontFamily: '"IBM Plex Mono", monospace',
+                    fontSize: 10,
+                    letterSpacing: '1px',
+                    padding: '5px 12px',
+                    borderRadius: 3,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {showMomentum ? 'HIDE' : 'SHOW'}
+                </button>
+              </div>
+              {showMomentum && (
+                <MomentumTracker
+                  plays={plays}
+                  homeName={game.home.name}
+                  awayName={game.away.name}
+                  homeAbbr={game.home.abbr}
+                  awayAbbr={game.away.abbr}
+                  homeScore={game.home.score}
+                  awayScore={game.away.score}
+                />
+              )}
             </div>
           )}
 
@@ -432,6 +471,279 @@ function PlayerTable({ teamStats }) {
       </div>
     </div>
   )
+}
+
+function MomentumTracker({ plays, homeName, awayName, homeAbbr, awayAbbr, homeScore, awayScore }) {
+  const [animStep, setAnimStep] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [speed, setSpeed] = useState(80)
+
+  // Build scoring snapshots from plays
+  const snapshots = useMemo(() => {
+    const result = [{ away: 0, home: 0, label: 'START', text: '', period: 1 }]
+    for (const play of plays) {
+      if (!play.scoringPlay) continue
+      const away = play.awayScore ?? result[result.length - 1].away
+      const home = play.homeScore ?? result[result.length - 1].home
+      const period = play.period?.number || play.period || 1
+      const periodLabel = period > 4 ? `OT${period - 4}` : `Q${period}`
+      const clock = play.clock?.displayValue || ''
+      const team = play.team?.abbreviation || ''
+      const text = play.text || play.description || ''
+      result.push({ away, home, label: `${periodLabel} ${clock}`, text, team, period })
+    }
+    return result
+  }, [plays])
+
+  // Auto-play animation
+  useEffect(() => {
+    if (!isPlaying) return
+    if (animStep >= snapshots.length - 1) {
+      setIsPlaying(false)
+      return
+    }
+    const timer = setTimeout(() => setAnimStep(s => s + 1), speed)
+    return () => clearTimeout(timer)
+  }, [isPlaying, animStep, snapshots.length, speed])
+
+  const current = snapshots[animStep] || snapshots[0]
+  const total = Math.max(current.away + current.home, 1)
+  const maxScore = Math.max(
+    ...snapshots.map(s => Math.max(s.away, s.home)), 1
+  )
+
+  // Momentum: diff swings between -1 (all away) and +1 (all home)
+  const diff = current.home - current.away
+  const maxDiff = Math.max(...snapshots.map(s => Math.abs(s.home - s.away)), 1)
+  const momentum = diff / Math.max(maxDiff, 20) // normalize to ~[-1, 1]
+  const barPercent = 50 + (momentum * 50) // 0-100, 50 = tied
+
+  // Build score chart data (every snapshot)
+  const chartWidth = 560
+  const chartHeight = 80
+
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      padding: '24px',
+    }}>
+      {/* Team labels */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--ncaa)', letterSpacing: '1px' }}>{awayAbbr}</span>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 28, fontWeight: 600, color: current.away > current.home ? 'var(--accent)' : '#666', transition: 'color 0.3s' }}>{current.away}</span>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 10, color: 'var(--muted)', letterSpacing: '1px' }}>{current.label}</div>
+          {current.text && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, maxWidth: 200, lineHeight: 1.4 }}>{current.text}</div>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 28, fontWeight: 600, color: current.home > current.away ? 'var(--accent)' : '#666', transition: 'color 0.3s' }}>{current.home}</span>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--nba)', letterSpacing: '1px' }}>{homeAbbr}</span>
+        </div>
+      </div>
+
+      {/* Momentum bar */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ position: 'relative', height: 28, background: '#1a1a1a', borderRadius: 14, overflow: 'hidden' }}>
+          {/* Away side fill */}
+          <div style={{
+            position: 'absolute', left: 0, top: 0, bottom: 0,
+            width: `${Math.max(0, 50 - barPercent + 50)}%`,
+            background: 'var(--ncaa)',
+            opacity: 0.7,
+            transition: 'width 0.5s cubic-bezier(0.4,0,0.2,1)',
+            borderRadius: '14px 0 0 14px',
+          }} />
+          {/* Home side fill */}
+          <div style={{
+            position: 'absolute', right: 0, top: 0, bottom: 0,
+            width: `${Math.max(0, barPercent - 50)}%`,
+            background: 'var(--nba)',
+            opacity: 0.7,
+            transition: 'width 0.5s cubic-bezier(0.4,0,0.2,1)',
+            borderRadius: '0 14px 14px 0',
+          }} />
+          {/* Center line */}
+          <div style={{
+            position: 'absolute', left: '50%', top: '15%', bottom: '15%',
+            width: 2, background: 'var(--border)', transform: 'translateX(-50%)',
+          }} />
+          {/* Marker */}
+          <div style={{
+            position: 'absolute',
+            left: `calc(${barPercent}% - 10px)`,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: 20, height: 20,
+            background: 'var(--accent)',
+            borderRadius: '50%',
+            transition: 'left 0.5s cubic-bezier(0.4,0,0.2,1)',
+            boxShadow: '0 0 8px rgba(232,255,71,0.6)',
+            zIndex: 2,
+          }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--ncaa)' }}>{awayAbbr} LEADS</span>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>TIED</span>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--nba)' }}>{homeAbbr} LEADS</span>
+        </div>
+      </div>
+
+      {/* Score chart — SVG line graph */}
+      <div style={{ marginBottom: 20, overflowX: 'auto' }}>
+        <svg width="100%" viewBox={`0 0 ${chartWidth} ${chartHeight + 20}`} style={{ display: 'block' }}>
+          {/* Grid lines */}
+          {[0, 0.25, 0.5, 0.75, 1].map(t => (
+            <line key={t}
+              x1={0} y1={chartHeight * (1 - t)}
+              x2={chartWidth} y2={chartHeight * (1 - t)}
+              stroke="var(--border)" strokeWidth={0.5}
+            />
+          ))}
+
+          {/* Period dividers */}
+          {[1, 2, 3, 4].map(p => {
+            const periodStart = snapshots.findIndex(s => s.period > p)
+            if (periodStart < 1) return null
+            const x = (periodStart / (snapshots.length - 1)) * chartWidth
+            return (
+              <g key={p}>
+                <line x1={x} y1={0} x2={x} y2={chartHeight} stroke="#333" strokeWidth={1} strokeDasharray="3,3" />
+                <text x={x + 4} y={10} fill="#444" fontSize={8} fontFamily="IBM Plex Mono, monospace">Q{p + 1}</text>
+              </g>
+            )
+          })}
+
+          {/* Away score line */}
+          <polyline
+            fill="none"
+            stroke="var(--ncaa)"
+            strokeWidth={1.5}
+            opacity={0.8}
+            points={snapshots.slice(0, animStep + 1).map((s, i) => {
+              const x = (i / Math.max(snapshots.length - 1, 1)) * chartWidth
+              const y = chartHeight - (s.away / maxScore) * chartHeight
+              return `${x},${y}`
+            }).join(' ')}
+          />
+
+          {/* Home score line */}
+          <polyline
+            fill="none"
+            stroke="var(--nba)"
+            strokeWidth={1.5}
+            opacity={0.8}
+            points={snapshots.slice(0, animStep + 1).map((s, i) => {
+              const x = (i / Math.max(snapshots.length - 1, 1)) * chartWidth
+              const y = chartHeight - (s.home / maxScore) * chartHeight
+              return `${x},${y}`
+            }).join(' ')}
+          />
+
+          {/* Current position dot - away */}
+          {animStep > 0 && (() => {
+            const s = snapshots[animStep]
+            const x = (animStep / Math.max(snapshots.length - 1, 1)) * chartWidth
+            const y = chartHeight - (s.away / maxScore) * chartHeight
+            return <circle cx={x} cy={y} r={4} fill="var(--ncaa)" />
+          })()}
+
+          {/* Current position dot - home */}
+          {animStep > 0 && (() => {
+            const s = snapshots[animStep]
+            const x = (animStep / Math.max(snapshots.length - 1, 1)) * chartWidth
+            const y = chartHeight - (s.home / maxScore) * chartHeight
+            return <circle cx={x} cy={y} r={4} fill="var(--nba)" />
+          })()}
+
+          {/* Legend */}
+          <circle cx={8} cy={chartHeight + 14} r={4} fill="var(--ncaa)" />
+          <text x={16} y={chartHeight + 17} fill="#888" fontSize={9} fontFamily="IBM Plex Mono, monospace">{awayAbbr}</text>
+          <circle cx={50} cy={chartHeight + 14} r={4} fill="var(--nba)" />
+          <text x={58} y={chartHeight + 17} fill="#888" fontSize={9} fontFamily="IBM Plex Mono, monospace">{homeAbbr}</text>
+        </svg>
+      </div>
+
+      {/* Scrubber */}
+      <div style={{ marginBottom: 16 }}>
+        <input
+          type="range"
+          min={0}
+          max={snapshots.length - 1}
+          value={animStep}
+          onChange={e => { setAnimStep(Number(e.target.value)); setIsPlaying(false) }}
+          style={{ width: '100%', accentColor: 'var(--accent)', cursor: 'pointer' }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>START</span>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>
+            {animStep} / {snapshots.length - 1} PLAYS
+          </span>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>FINAL</span>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
+          onClick={() => { setAnimStep(0); setIsPlaying(false) }}
+          style={ctrlBtn}
+        >⏮</button>
+        <button
+          onClick={() => setAnimStep(s => Math.max(0, s - 1))}
+          style={ctrlBtn}
+        >◀</button>
+        <button
+          onClick={() => {
+            if (animStep >= snapshots.length - 1) setAnimStep(0)
+            setIsPlaying(p => !p)
+          }}
+          style={{ ...ctrlBtn, background: 'var(--accent)', color: '#000', minWidth: 64 }}
+        >
+          {isPlaying ? '⏸ PAUSE' : '▶ PLAY'}
+        </button>
+        <button
+          onClick={() => setAnimStep(s => Math.min(snapshots.length - 1, s + 1))}
+          style={ctrlBtn}
+        >▶</button>
+        <button
+          onClick={() => { setAnimStep(snapshots.length - 1); setIsPlaying(false) }}
+          style={ctrlBtn}
+        >⏭</button>
+
+        {/* Speed control */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>SPEED</span>
+          {[200, 100, 50].map(s => (
+            <button key={s} onClick={() => setSpeed(s)} style={{
+              ...ctrlBtn,
+              borderColor: speed === s ? 'var(--accent)' : 'var(--border)',
+              color: speed === s ? 'var(--accent)' : 'var(--muted)',
+              fontSize: 9,
+            }}>
+              {s === 200 ? '1×' : s === 100 ? '2×' : '4×'}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const ctrlBtn = {
+  background: 'transparent',
+  border: '1px solid var(--border)',
+  color: 'var(--muted)',
+  fontFamily: '"IBM Plex Mono", monospace',
+  fontSize: 11,
+  padding: '5px 10px',
+  borderRadius: 3,
+  cursor: 'pointer',
 }
 
 function PlayByPlay({ plays, homeAbbr, awayAbbr }) {
