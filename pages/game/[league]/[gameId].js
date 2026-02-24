@@ -1,13 +1,39 @@
 import Head from 'next/head'
 import Link from 'next/link'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
 
-export default function GamePage({ game, summary, league, debugInfo }) {
+export default function GamePage({ game: initialGame, summary: initialSummary, league, debugInfo }) {
   const [mounted, setMounted] = useState(false)
   const [showPlays, setShowPlays] = useState(false)
   const [showMomentum, setShowMomentum] = useState(false)
+  const [showCourt, setShowCourt] = useState(false)
+  const [game, setGame] = useState(initialGame)
+  const [plays, setPlays] = useState(initialSummary?.plays || [])
+  const [leaders, setLeaders] = useState(initialSummary?.leaders || [])
+  const [playerStats, setPlayerStats] = useState(initialSummary?.boxscore?.players || [])
+  const [lastUpdated, setLastUpdated] = useState(null)
+
   useEffect(() => setMounted(true), [])
+
+  // Live polling — every 30s for live games
+  useEffect(() => {
+    if (!initialGame?.isLive) return
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/game?league=${league}&gameId=${initialGame.id}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.game) setGame(data.game)
+        if (data.plays) setPlays(data.plays)
+        if (data.leaders) setLeaders(data.leaders)
+        if (data.playerStats) setPlayerStats(data.playerStats)
+        setLastUpdated(new Date())
+      } catch (e) { /* silent */ }
+    }
+    const interval = setInterval(poll, 30000)
+    return () => clearInterval(interval)
+  }, [initialGame?.isLive, initialGame?.id, league])
 
   if (!game) {
     return (
@@ -20,11 +46,6 @@ export default function GamePage({ game, summary, league, debugInfo }) {
   const hasScore = game.home.score !== null && game.away.score !== null
   const homeWins = hasScore && Number(game.home.score) > Number(game.away.score)
   const awayWins = hasScore && Number(game.away.score) > Number(game.home.score)
-
-  const boxscore = summary?.boxscore
-  const playerStats = boxscore?.players || []
-  const leaders = summary?.leaders || summary?.seasonseries?.[0]?.leaders || []
-  const plays = summary?.plays || []
 
   return (
     <>
@@ -213,6 +234,65 @@ export default function GamePage({ game, summary, league, debugInfo }) {
             </div>
           )}
 
+          {/* Court Animation */}
+          {plays.length > 0 && (
+            <div style={{ marginTop: 32 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <SectionHead text="LIVE COURT" />
+                  {game.isLive && (
+                    <span style={{
+                      fontFamily: '"IBM Plex Mono", monospace',
+                      fontSize: 9,
+                      color: 'var(--live)',
+                      letterSpacing: '1px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}>
+                      <span style={{
+                        width: 5, height: 5, borderRadius: '50%',
+                        background: 'var(--live)',
+                        display: 'inline-block',
+                        animation: 'pulse 1.5s infinite',
+                      }} />
+                      LIVE
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setShowCourt(p => !p)}
+                  style={{
+                    background: showCourt ? 'var(--accent)' : 'transparent',
+                    border: '1px solid',
+                    borderColor: showCourt ? 'var(--accent)' : 'var(--border)',
+                    color: showCourt ? '#000' : 'var(--muted)',
+                    fontFamily: '"IBM Plex Mono", monospace',
+                    fontSize: 10,
+                    letterSpacing: '1px',
+                    padding: '5px 12px',
+                    borderRadius: 3,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {showCourt ? 'HIDE' : 'SHOW'}
+                </button>
+              </div>
+              {showCourt && (
+                <CourtAnimation
+                  plays={plays}
+                  homeAbbr={game.home.abbr}
+                  awayAbbr={game.away.abbr}
+                  homeLogo={game.home.logo}
+                  awayLogo={game.away.logo}
+                  isLive={game.isLive}
+                  lastUpdated={lastUpdated}
+                />
+              )}
+            </div>
+          )}
+
           {playerStats.length === 0 && !game.isScheduled && (
             <div style={{
               marginTop: 40,
@@ -244,26 +324,6 @@ export default function GamePage({ game, summary, league, debugInfo }) {
           )}
 
           {/* Temporary debug panel - remove after fixing */}
-          {debugInfo && (
-            <div style={{
-              marginTop: 40,
-              padding: 16,
-              background: '#0f0f0f',
-              border: '1px solid #333',
-              borderRadius: 4,
-              fontFamily: '"IBM Plex Mono", monospace',
-              fontSize: 10,
-              color: '#888',
-              wordBreak: 'break-all',
-              whiteSpace: 'pre-wrap',
-            }}>
-              <div style={{ color: 'var(--accent)', marginBottom: 8 }}>DEBUG (will remove)</div>
-              <div><strong>Top Keys:</strong> {debugInfo.topKeys?.join(', ')}</div>
-              <div style={{ marginTop: 8 }}><strong>Boxscore Keys:</strong> {debugInfo.boxscoreKeys?.join(', ')}</div>
-              <div style={{ marginTop: 8 }}><strong>Leaders Raw:</strong> {debugInfo.leadersRaw}</div>
-              <div style={{ marginTop: 8 }}><strong>Players Raw:</strong> {debugInfo.playersRaw}</div>
-            </div>
-          )}
         </main>
       </div>
     </>
@@ -470,6 +530,327 @@ function PlayerTable({ teamStats }) {
         </table>
       </div>
     </div>
+  )
+}
+
+function CourtAnimation({ plays, homeAbbr, awayAbbr, homeLogo, awayLogo, isLive, lastUpdated }) {
+  const [currentPlayIdx, setCurrentPlayIdx] = useState(null)
+  const [particles, setParticles] = useState([])
+  const [autoPlay, setAutoPlay] = useState(isLive)
+  const [speed, setSpeed] = useState(1500)
+  const timerRef = useRef(null)
+  const particleId = useRef(0)
+
+  // Only scoring plays
+  const scoringPlays = useMemo(() =>
+    plays.filter(p => p.scoringPlay),
+  [plays])
+
+  // Detect play type from description text
+  const getPlayType = (text = '') => {
+    const t = text.toLowerCase()
+    if (t.includes('three') || t.includes('3-pt') || t.includes('3pt')) return '3PT'
+    if (t.includes('free throw') || t.includes('foul shot')) return 'FT'
+    if (t.includes('dunk')) return 'DUNK'
+    if (t.includes('layup') || t.includes('lay up')) return 'LAYUP'
+    if (t.includes('alley')) return 'ALLEY-OOP'
+    if (t.includes('hook')) return 'HOOK'
+    return 'JUMP SHOT'
+  }
+
+  // Estimate shot position from play type and team
+  // Court is 500x270, home basket right side, away basket left side
+  const getShotOrigin = (play, type) => {
+    const isHome = play.team?.abbreviation === homeAbbr
+    const baseX = isHome ? 380 : 120  // which half
+    const jitter = () => (Math.random() - 0.5) * 60
+
+    if (type === '3PT') return { x: baseX + (isHome ? -60 : 60) + jitter(), y: 135 + jitter() * 1.5 }
+    if (type === 'FT') return { x: isHome ? 340 : 160, y: 135 }
+    if (type === 'DUNK' || type === 'LAYUP' || type === 'ALLEY-OOP') return { x: isHome ? 455 : 45, y: 135 + jitter() * 0.3 }
+    return { x: baseX + jitter() * 0.5, y: 135 + jitter() }
+  }
+
+  const getBasketPos = (isHome) => ({ x: isHome ? 472 : 28, y: 135 })
+
+  const firePlay = useCallback((idx) => {
+    if (idx < 0 || idx >= scoringPlays.length) return
+    const play = scoringPlays[idx]
+    const type = getPlayType(play.text)
+    const isHome = play.team?.abbreviation === homeAbbr
+    const origin = getShotOrigin(play, type)
+    const basket = getBasketPos(isHome)
+    const id = ++particleId.current
+
+    setCurrentPlayIdx(idx)
+    setParticles(prev => [...prev.slice(-8), {
+      id, origin, basket, type, isHome,
+      text: play.text || '',
+      away: play.awayScore,
+      home: play.homeScore,
+      team: play.team?.abbreviation || '',
+      born: Date.now(),
+    }])
+  }, [scoringPlays, homeAbbr])
+
+  // Auto-advance
+  useEffect(() => {
+    if (!autoPlay) { clearTimeout(timerRef.current); return }
+    const next = (currentPlayIdx ?? -1) + 1
+    if (next >= scoringPlays.length) { setAutoPlay(false); return }
+    timerRef.current = setTimeout(() => firePlay(next), speed)
+    return () => clearTimeout(timerRef.current)
+  }, [autoPlay, currentPlayIdx, scoringPlays.length, speed, firePlay])
+
+  // When live data updates, jump to latest
+  useEffect(() => {
+    if (isLive && scoringPlays.length > 0) {
+      const latest = scoringPlays.length - 1
+      setCurrentPlayIdx(latest)
+      firePlay(latest)
+    }
+  }, [lastUpdated]) // eslint-disable-line
+
+  const current = currentPlayIdx !== null ? scoringPlays[currentPlayIdx] : null
+
+  const W = 500, H = 270
+
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      padding: 24,
+      userSelect: 'none',
+    }}>
+      {/* Current play callout */}
+      <div style={{
+        minHeight: 48,
+        marginBottom: 16,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+      }}>
+        {current ? (
+          <>
+            <div>
+              <div style={{
+                fontFamily: '"IBM Plex Mono", monospace',
+                fontSize: 10,
+                color: current.team === homeAbbr ? 'var(--nba)' : 'var(--ncaa)',
+                letterSpacing: '1px',
+                marginBottom: 4,
+              }}>
+                {current.team} · {getPlayType(current.text)}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.4 }}>
+                {current.text}
+              </div>
+            </div>
+            <div style={{
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 22,
+              fontWeight: 600,
+              color: 'var(--accent)',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}>
+              {current.awayScore}–{current.homeScore}
+            </div>
+          </>
+        ) : (
+          <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: 'var(--muted)' }}>
+            PRESS PLAY TO REPLAY SCORING PLAYS
+          </div>
+        )}
+      </div>
+
+      {/* Court SVG */}
+      <div style={{ position: 'relative', borderRadius: 4, overflow: 'hidden' }}>
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          style={{ width: '100%', display: 'block', background: '#0d1a0d' }}
+        >
+          {/* Court floor */}
+          <rect x={0} y={0} width={W} height={H} fill="#0d1a0d" />
+
+          {/* Court outline */}
+          <rect x={10} y={10} width={W - 20} height={H - 20}
+            fill="none" stroke="#1a3a1a" strokeWidth={2} rx={4} />
+
+          {/* Half court line */}
+          <line x1={W/2} y1={10} x2={W/2} y2={H - 10} stroke="#1a3a1a" strokeWidth={1.5} />
+
+          {/* Center circle */}
+          <circle cx={W/2} cy={H/2} r={40} fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
+          <circle cx={W/2} cy={H/2} r={4} fill="#1a3a1a" />
+
+          {/* Left paint / key */}
+          <rect x={10} y={H/2 - 60} width={100} height={120}
+            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
+          {/* Left free throw circle */}
+          <path d={`M 110 ${H/2 - 40} A 40 40 0 0 1 110 ${H/2 + 40}`}
+            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
+          {/* Left 3pt arc */}
+          <path d={`M 10 ${H/2 - 90} L 65 ${H/2 - 90} A 100 100 0 0 1 65 ${H/2 + 90} L 10 ${H/2 + 90}`}
+            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
+          {/* Left basket */}
+          <circle cx={28} cy={H/2} r={8} fill="none" stroke="#2a5a2a" strokeWidth={2} />
+          <circle cx={28} cy={H/2} r={2} fill="#2a5a2a" />
+
+          {/* Right paint / key */}
+          <rect x={W - 110} y={H/2 - 60} width={100} height={120}
+            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
+          {/* Right free throw circle */}
+          <path d={`M ${W - 110} ${H/2 - 40} A 40 40 0 0 0 ${W - 110} ${H/2 + 40}`}
+            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
+          {/* Right 3pt arc */}
+          <path d={`M ${W - 10} ${H/2 - 90} L ${W - 65} ${H/2 - 90} A 100 100 0 0 0 ${W - 65} ${H/2 + 90} L ${W - 10} ${H/2 + 90}`}
+            fill="none" stroke="#1a3a1a" strokeWidth={1.5} />
+          {/* Right basket */}
+          <circle cx={W - 28} cy={H/2} r={8} fill="none" stroke="#2a5a2a" strokeWidth={2} />
+          <circle cx={W - 28} cy={H/2} r={2} fill="#2a5a2a" />
+
+          {/* Team labels */}
+          <text x={40} y={22} textAnchor="middle" fill="#2a5a2a" fontSize={9}
+            fontFamily="IBM Plex Mono, monospace">{awayAbbr}</text>
+          <text x={W - 40} y={22} textAnchor="middle" fill="#2a5a2a" fontSize={9}
+            fontFamily="IBM Plex Mono, monospace">{homeAbbr}</text>
+
+          {/* Particles — shot arcs */}
+          {particles.map(p => (
+            <ShotParticle key={p.id} particle={p} W={W} H={H} />
+          ))}
+        </svg>
+      </div>
+
+      {/* Controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+        <button onClick={() => { setCurrentPlayIdx(null); setParticles([]); setAutoPlay(false) }} style={ctrlBtn}>⏮</button>
+        <button onClick={() => { const prev = (currentPlayIdx ?? 0) - 1; if (prev >= 0) firePlay(prev) }} style={ctrlBtn}>◀</button>
+        <button
+          onClick={() => {
+            if (currentPlayIdx !== null && currentPlayIdx >= scoringPlays.length - 1) {
+              setCurrentPlayIdx(null)
+              setParticles([])
+              setTimeout(() => setAutoPlay(true), 100)
+            } else {
+              setAutoPlay(p => !p)
+            }
+          }}
+          style={{ ...ctrlBtn, background: autoPlay ? 'var(--live)' : 'var(--accent)', color: '#000', minWidth: 72 }}
+        >
+          {autoPlay ? '⏸ PAUSE' : '▶ PLAY'}
+        </button>
+        <button onClick={() => { const next = (currentPlayIdx ?? -1) + 1; if (next < scoringPlays.length) firePlay(next) }} style={ctrlBtn}>▶</button>
+        <button onClick={() => firePlay(scoringPlays.length - 1)} style={ctrlBtn}>⏭</button>
+
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>SPEED</span>
+          {[2000, 1200, 600].map((s, i) => (
+            <button key={s} onClick={() => setSpeed(s)} style={{
+              ...ctrlBtn,
+              borderColor: speed === s ? 'var(--accent)' : 'var(--border)',
+              color: speed === s ? 'var(--accent)' : 'var(--muted)',
+              fontSize: 9, padding: '4px 8px',
+            }}>
+              {['1×', '2×', '4×'][i]}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)', marginLeft: 8 }}>
+          {currentPlayIdx !== null ? currentPlayIdx + 1 : 0}/{scoringPlays.length}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
+        {[
+          { color: 'var(--ncaa)', label: awayAbbr },
+          { color: 'var(--nba)', label: homeAbbr },
+          { color: 'var(--accent)', label: '3PT' },
+          { color: 'var(--live)', label: 'DUNK/LAYUP' },
+        ].map(({ color, label }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
+            <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, color: 'var(--muted)' }}>{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ShotParticle({ particle, W, H }) {
+  const { origin, basket, type, isHome, born } = particle
+  const [t, setT] = useState(0)
+  const rafRef = useRef(null)
+  const duration = 900
+
+  useEffect(() => {
+    const start = performance.now()
+    const animate = (now) => {
+      const elapsed = now - start
+      const progress = Math.min(elapsed / duration, 1)
+      setT(progress)
+      if (progress < 1) rafRef.current = requestAnimationFrame(animate)
+    }
+    rafRef.current = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [])
+
+  // Ease in-out
+  const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
+  const x = origin.x + (basket.x - origin.x) * ease
+  // Parabolic arc — peaks in the middle
+  const arcHeight = type === '3PT' ? 70 : type === 'FT' ? 60 : 45
+  const y = origin.y + (basket.y - origin.y) * ease - Math.sin(ease * Math.PI) * arcHeight
+
+  const opacity = t > 0.85 ? 1 - (t - 0.85) / 0.15 : 1
+  const size = t > 0.8 ? 6 + (1 - t) * 20 : 6
+
+  const color = type === '3PT' ? 'var(--accent)'
+    : type === 'DUNK' || type === 'LAYUP' || type === 'ALLEY-OOP' ? 'var(--live)'
+    : isHome ? 'var(--nba)' : 'var(--ncaa)'
+
+  // Trail dots
+  const trail = [0.15, 0.3, 0.45].map((offset) => {
+    const tp = Math.max(0, ease - offset)
+    const tx = origin.x + (basket.x - origin.x) * tp
+    const ty = origin.y + (basket.y - origin.y) * tp - Math.sin(tp * Math.PI) * arcHeight
+    return { tx, ty, opacity: opacity * (1 - offset / 0.5) * 0.4 }
+  })
+
+  if (t === 0) return null
+
+  return (
+    <g>
+      {/* Trail */}
+      {trail.map((tr, i) => (
+        <circle key={i} cx={tr.tx} cy={tr.ty} r={3} fill={color} opacity={tr.opacity} />
+      ))}
+      {/* Main ball */}
+      <circle cx={x} cy={y} r={size / 2} fill={color} opacity={opacity} />
+      {/* Glow */}
+      <circle cx={x} cy={y} r={size} fill={color} opacity={opacity * 0.15} />
+      {/* Points burst at basket */}
+      {t > 0.85 && (
+        <text
+          x={basket.x}
+          y={basket.y - 10 - (t - 0.85) * 80}
+          textAnchor="middle"
+          fill={color}
+          fontSize={12}
+          fontFamily="IBM Plex Mono, monospace"
+          fontWeight={600}
+          opacity={1 - (t - 0.85) / 0.15}
+        >
+          {type === '3PT' ? '+3' : type === 'FT' ? '+1' : '+2'}
+        </text>
+      )}
+    </g>
   )
 }
 
@@ -920,23 +1301,12 @@ export async function getServerSideProps({ params }) {
       const res = await fetch(`${ESPN_BASE}/${leaguePath}/summary?event=${gameId}`)
       if (res.ok) {
         summary = await res.json()
-        // Debug: log top-level keys so we can see structure
-        console.log('Summary keys:', Object.keys(summary))
-        console.log('Boxscore keys:', summary.boxscore ? Object.keys(summary.boxscore) : 'no boxscore')
-        console.log('Players sample:', JSON.stringify(summary.boxscore?.players?.[0])?.slice(0, 300))
-        console.log('Leaders sample:', JSON.stringify(summary.leaders?.[0])?.slice(0, 300))
       }
     } catch (e) {
       // summary not available
     }
 
-    const debugInfo = summary ? {
-      topKeys: Object.keys(summary),
-      leadersRaw: JSON.stringify(summary.leaders)?.slice(0, 1000) || 'none',
-      boxscoreKeys: summary.boxscore ? Object.keys(summary.boxscore) : [],
-      playersRaw: JSON.stringify(summary.boxscore?.players?.[0])?.slice(0, 1000) || 'none',
-    } : null
-
+    const debugInfo = null
     return {
       props: {
         game,
