@@ -5,6 +5,7 @@ import { parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/
 
 export default function GamePage({ game, summary, league, debugInfo }) {
   const [mounted, setMounted] = useState(false)
+  const [showPlays, setShowPlays] = useState(false)
   useEffect(() => setMounted(true), [])
 
   if (!game) {
@@ -19,10 +20,10 @@ export default function GamePage({ game, summary, league, debugInfo }) {
   const homeWins = hasScore && Number(game.home.score) > Number(game.away.score)
   const awayWins = hasScore && Number(game.away.score) > Number(game.home.score)
 
-  // Parse player stats from summary
   const boxscore = summary?.boxscore
   const playerStats = boxscore?.players || []
   const leaders = summary?.leaders || summary?.seasonseries?.[0]?.leaders || []
+  const plays = summary?.plays || []
 
   return (
     <>
@@ -142,6 +143,34 @@ export default function GamePage({ game, summary, league, debugInfo }) {
               {playerStats.map((teamStats, ti) => (
                 <PlayerTable key={ti} teamStats={teamStats} />
               ))}
+            </div>
+          )}
+
+          {/* Play-by-Play */}
+          {plays.length > 0 && (
+            <div style={{ marginTop: 32 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <SectionHead text="PLAY-BY-PLAY" />
+                <button
+                  onClick={() => setShowPlays(p => !p)}
+                  style={{
+                    background: showPlays ? 'var(--accent)' : 'transparent',
+                    border: '1px solid',
+                    borderColor: showPlays ? 'var(--accent)' : 'var(--border)',
+                    color: showPlays ? '#000' : 'var(--muted)',
+                    fontFamily: '"IBM Plex Mono", monospace',
+                    fontSize: 10,
+                    letterSpacing: '1px',
+                    padding: '5px 12px',
+                    borderRadius: 3,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {showPlays ? 'HIDE' : 'SHOW'}
+                </button>
+              </div>
+              {showPlays && <PlayByPlay plays={plays} homeAbbr={game.home.abbr} awayAbbr={game.away.abbr} />}
             </div>
           )}
 
@@ -401,6 +430,157 @@ function PlayerTable({ teamStats }) {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+function PlayByPlay({ plays, homeAbbr, awayAbbr }) {
+  const [filter, setFilter] = useState('ALL')
+
+  // ESPN plays are oldest-first, we want newest-first
+  const reversed = [...plays].reverse()
+
+  // Group by period
+  const periods = {}
+  for (const play of reversed) {
+    const p = play.period?.number || play.period || 0
+    const label = p === 0 ? 'PRE' : p > 4 ? `OT${p - 4}` : `Q${p}`
+    if (!periods[label]) periods[label] = []
+    periods[label].push(play)
+  }
+
+  const periodKeys = Object.keys(periods)
+  const activeFilter = filter === 'ALL' || !periodKeys.includes(filter) ? 'ALL' : filter
+  const displayPeriods = activeFilter === 'ALL' ? periodKeys : [activeFilter]
+
+  return (
+    <div>
+      {/* Period filter tabs */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        {['ALL', ...periodKeys].map(p => (
+          <button
+            key={p}
+            onClick={() => setFilter(p)}
+            style={{
+              background: (activeFilter === 'ALL' && p === 'ALL') || activeFilter === p
+                ? 'var(--accent)' : 'transparent',
+              border: '1px solid',
+              borderColor: (activeFilter === 'ALL' && p === 'ALL') || activeFilter === p
+                ? 'var(--accent)' : 'var(--border)',
+              color: (activeFilter === 'ALL' && p === 'ALL') || activeFilter === p
+                ? '#000' : 'var(--muted)',
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 10,
+              letterSpacing: '1px',
+              padding: '4px 10px',
+              borderRadius: 3,
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+
+      {/* Plays list */}
+      {displayPeriods.map(period => (
+        <div key={period} style={{ marginBottom: 24 }}>
+          <div style={{
+            fontFamily: '"IBM Plex Mono", monospace',
+            fontSize: 10,
+            color: 'var(--muted)',
+            letterSpacing: '2px',
+            marginBottom: 8,
+            paddingBottom: 6,
+            borderBottom: '1px solid var(--border)',
+          }}>
+            {period}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {periods[period].map((play, i) => {
+              const teamAbbr = play.team?.abbreviation || ''
+              const isHome = teamAbbr === homeAbbr
+              const isAway = teamAbbr === awayAbbr
+              const isScoring = play.scoringPlay
+              const clock = play.clock?.displayValue || ''
+              const description = play.text || play.description || ''
+              const awayScore = play.awayScore ?? null
+              const homeScore = play.homeScore ?? null
+              const athlete = play.participants?.[0]?.athlete
+
+              return (
+                <div key={i} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '48px 1fr auto',
+                  alignItems: 'start',
+                  gap: 12,
+                  padding: '8px 10px',
+                  borderRadius: 3,
+                  background: isScoring ? 'rgba(232,255,71,0.04)' : 'transparent',
+                  borderLeft: isScoring ? '2px solid var(--accent)' : '2px solid transparent',
+                }}>
+                  {/* Clock */}
+                  <span style={{
+                    fontFamily: '"IBM Plex Mono", monospace',
+                    fontSize: 10,
+                    color: 'var(--muted)',
+                    paddingTop: 1,
+                    flexShrink: 0,
+                  }}>
+                    {clock}
+                  </span>
+
+                  {/* Play description */}
+                  <div>
+                    {teamAbbr && (
+                      <span style={{
+                        fontFamily: '"IBM Plex Mono", monospace',
+                        fontSize: 9,
+                        color: isHome ? 'var(--nba)' : 'var(--ncaa)',
+                        marginRight: 6,
+                        letterSpacing: '1px',
+                      }}>
+                        {teamAbbr}
+                      </span>
+                    )}
+                    <span style={{
+                      fontSize: 12,
+                      color: isScoring ? 'var(--text)' : '#999',
+                      fontWeight: isScoring ? 500 : 400,
+                    }}>
+                      {description}
+                    </span>
+                    {athlete && (
+                      <span style={{
+                        marginLeft: 6,
+                        fontSize: 10,
+                        fontFamily: '"IBM Plex Mono", monospace',
+                        color: 'var(--muted)',
+                      }}>
+                        — {athlete.shortName || athlete.displayName}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Score */}
+                  {awayScore !== null && homeScore !== null && (
+                    <span style={{
+                      fontFamily: '"IBM Plex Mono", monospace',
+                      fontSize: 11,
+                      color: isScoring ? 'var(--accent)' : 'var(--muted)',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}>
+                      {awayScore}–{homeScore}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
