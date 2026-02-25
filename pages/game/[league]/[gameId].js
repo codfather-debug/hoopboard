@@ -7,7 +7,6 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
   const [mounted, setMounted] = useState(false)
   const [showPlays, setShowPlays] = useState(false)
   const [showMomentum, setShowMomentum] = useState(false)
-  const [showCourt, setShowCourt] = useState(false)
   const [showBoxScore, setShowBoxScore] = useState(false)
   const [game, setGame] = useState(initialGame)
   const [plays, setPlays] = useState(initialSummary?.plays || [])
@@ -160,11 +159,60 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
           {game.venue && <InfoRow label="VENUE" value={game.venue} />}
           {game.odds && <InfoRow label="SPREAD" value={game.odds} />}
 
-          {/* Stat Leaders */}
-          {leaders.length > 0 && (
-            <div style={{ marginTop: 32 }}>
-              <SectionHead text="STAT LEADERS" />
-              <LeadersTable leaders={leaders} />
+          {/* Stat Leaders + Player Spotlight (two-column) */}
+          {(leaders.length > 0 || playerStats.length > 0) && (
+            <div style={{
+              marginTop: 32,
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 24,
+              alignItems: 'start',
+            }}>
+              {/* Left: Stat Leaders */}
+              <div>
+                {leaders.length > 0 && (
+                  <>
+                    <SectionHead text="STAT LEADERS" />
+                    <LeadersTable leaders={leaders} />
+                  </>
+                )}
+              </div>
+
+              {/* Right: Player Spotlight */}
+              <div>
+                {playerStats.length > 0 && (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                      <SectionHead text="PLAYER SPOTLIGHT" />
+                      {game.isLive && (
+                        <span style={{
+                          fontFamily: '"IBM Plex Mono", monospace',
+                          fontSize: 9,
+                          color: 'var(--live)',
+                          letterSpacing: '1px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}>
+                          <span style={{
+                            width: 5, height: 5, borderRadius: '50%',
+                            background: 'var(--live)',
+                            display: 'inline-block',
+                          }} />
+                          LIVE
+                        </span>
+                      )}
+                    </div>
+                    <PlayerSpotlight
+                      playerStats={playerStats}
+                      homeAbbr={game.home.abbr}
+                      awayAbbr={game.away.abbr}
+                      homeLogo={game.home.logo}
+                      awayLogo={game.away.logo}
+                    />
+                  </>
+                )}
+              </div>
             </div>
           )}
 
@@ -264,61 +312,6 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
             </div>
           )}
 
-          {/* Player Spotlight */}
-          {playerStats.length > 0 && (
-            <div style={{ marginTop: 32 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <SectionHead text="PLAYER SPOTLIGHT" />
-                  {game.isLive && (
-                    <span style={{
-                      fontFamily: '"IBM Plex Mono", monospace',
-                      fontSize: 9,
-                      color: 'var(--live)',
-                      letterSpacing: '1px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}>
-                      <span style={{
-                        width: 5, height: 5, borderRadius: '50%',
-                        background: 'var(--live)',
-                        display: 'inline-block',
-                      }} />
-                      LIVE
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => setShowCourt(p => !p)}
-                  style={{
-                    background: showCourt ? 'var(--accent)' : 'transparent',
-                    border: '1px solid',
-                    borderColor: showCourt ? 'var(--accent)' : 'var(--border)',
-                    color: showCourt ? '#000' : 'var(--muted)',
-                    fontFamily: '"IBM Plex Mono", monospace',
-                    fontSize: 10,
-                    letterSpacing: '1px',
-                    padding: '5px 12px',
-                    borderRadius: 3,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  {showCourt ? 'HIDE' : 'SHOW'}
-                </button>
-              </div>
-              {showCourt && (
-                <PlayerSpotlight
-                  playerStats={playerStats}
-                  homeAbbr={game.home.abbr}
-                  awayAbbr={game.away.abbr}
-                  homeLogo={game.home.logo}
-                  awayLogo={game.away.logo}
-                />
-              )}
-            </div>
-          )}
 
           {playerStats.length === 0 && !game.isScheduled && (
             <div style={{
