@@ -16,8 +16,11 @@ export default async function handler(req, res) {
     const eventRaw = allRaw.find(e => e.id === gameId)
     const game = eventRaw ? parseGame(eventRaw, league) : null
 
+    // Linescores come directly from the scoreboard event competitors
+    const linescores = eventRaw?.competitions?.[0]?.competitors || []
+
     const leaguePath = league === 'nba' ? 'nba' : 'mens-college-basketball'
-    let plays = [], leaders = [], playerStats = [], linescores = []
+    let plays = [], leaders = [], playerStats = []
 
     try {
       const summaryRes = await fetch(`${ESPN_BASE}/${leaguePath}/summary?event=${gameId}`)
@@ -26,7 +29,6 @@ export default async function handler(req, res) {
         plays = summary.plays || []
         leaders = summary.leaders || []
         playerStats = summary.boxscore?.players || []
-        linescores = summary.header?.competitions?.[0]?.competitors || []
       }
     } catch (e) { /* silent */ }
 

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
 
-export default function GamePage({ game: initialGame, summary: initialSummary, league, debugInfo }) {
+export default function GamePage({ game: initialGame, summary: initialSummary, league, debugInfo, initialLinescores }) {
   const [mounted, setMounted] = useState(false)
   const [showPlays, setShowPlays] = useState(false)
   const [showMomentum, setShowMomentum] = useState(false)
@@ -13,7 +13,7 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
   const [plays, setPlays] = useState(initialSummary?.plays || [])
   const [leaders, setLeaders] = useState(initialSummary?.leaders || [])
   const [playerStats, setPlayerStats] = useState(initialSummary?.boxscore?.players || [])
-  const [linescores, setLinescores] = useState(initialSummary?.header?.competitions?.[0]?.competitors || [])
+  const [linescores, setLinescores] = useState(initialLinescores || [])
   const [lastUpdated, setLastUpdated] = useState(null)
 
   useEffect(() => setMounted(true), [])
@@ -148,6 +148,13 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
             </div>
           </div>
 
+          {/* Quarter Scores */}
+          {linescores.length > 0 && hasScore && (
+            <div style={{ marginBottom: 32 }}>
+              <QuarterScores competitors={linescores} homeAbbr={game.home.abbr} awayAbbr={game.away.abbr} />
+            </div>
+          )}
+
           {/* Broadcast & Venue */}
           <InfoRow label="BROADCAST" value={game.networks.join(' · ')} />
           {game.venue && <InfoRow label="VENUE" value={game.venue} />}
@@ -158,14 +165,6 @@ export default function GamePage({ game: initialGame, summary: initialSummary, l
             <div style={{ marginTop: 32 }}>
               <SectionHead text="STAT LEADERS" />
               <LeadersTable leaders={leaders} />
-            </div>
-          )}
-
-          {/* Quarter Scores */}
-          {linescores.length > 0 && hasScore && (
-            <div style={{ marginTop: 32 }}>
-              <SectionHead text="QUARTER SCORES" />
-              <QuarterScores competitors={linescores} homeAbbr={game.home.abbr} awayAbbr={game.away.abbr} />
             </div>
           )}
 
@@ -523,7 +522,7 @@ function QuarterScores({ competitors, homeAbbr, awayAbbr }) {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ borderBottom: '1px solid var(--border)' }}>
-            <th style={{ ...headStyle, textAlign: 'left' }}>TEAM</th>
+            <th style={{ ...headStyle, textAlign: 'left', letterSpacing: '2px', color: 'var(--accent)' }}>QUARTER SCORES</th>
             {headers.map(h => <th key={h} style={headStyle}>{h}</th>)}
             <th style={{ ...headStyle, color: 'var(--text)' }}>TOT</th>
           </tr>
@@ -1320,6 +1319,7 @@ export async function getServerSideProps({ params }) {
       // summary not available
     }
 
+    const initialLinescores = eventRaw?.competitions?.[0]?.competitors || []
     const debugInfo = null
     return {
       props: {
@@ -1327,6 +1327,7 @@ export async function getServerSideProps({ params }) {
         summary,
         league,
         debugInfo,
+        initialLinescores,
       }
     }
   } catch (err) {
