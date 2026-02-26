@@ -86,7 +86,7 @@ export default function Home({ nbaGames, ncaaGames, fetchedAt, dateStr }) {
               border: '1px solid rgba(201,162,39,0.3)',
               borderRadius: 3,
               letterSpacing: '1px',
-            }}>NBA ⚡</Link>
+            }}>NBA FIRST POINTS</Link>
           </div>
 
           {/* Date navigation */}
