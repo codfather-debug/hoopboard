@@ -1,7 +1,7 @@
 import Head from 'next/head'
 import Link from 'next/link'
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { parseGame, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
+import { parseGame, parseGameFromSummaryHeader, getNBAScoreboard, getNCAA_MBScoreboard } from '../../../lib/espn'
 
 export default function GamePage({ game: initialGame, summary: initialSummary, league, debugInfo, initialLinescores }) {
   const [mounted, setMounted] = useState(false)
@@ -1296,9 +1296,7 @@ export async function getServerSideProps({ params }) {
 
     const allRaw = league === 'nba' ? nbaRaw : ncaaRaw
     const eventRaw = allRaw.find(e => e.id === gameId)
-    const game = eventRaw ? parseGame(eventRaw, league) : null
-
-    // Fetch game summary for detailed stats
+    // Fetch game summary for detailed stats (works for past games too)
     const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/basketball'
     const leaguePath = league === 'nba' ? 'nba' : 'mens-college-basketball'
     let summary = null
@@ -1312,7 +1310,15 @@ export async function getServerSideProps({ params }) {
       // summary not available
     }
 
-    const initialLinescores = eventRaw?.competitions?.[0]?.competitors || []
+    // If the game isn't in today's scoreboard (e.g. a past game), fall back to the summary header
+    const game = eventRaw
+      ? parseGame(eventRaw, league)
+      : parseGameFromSummaryHeader(summary?.header, league)
+
+    const initialLinescores =
+      eventRaw?.competitions?.[0]?.competitors ||
+      summary?.header?.competitions?.[0]?.competitors ||
+      []
     const debugInfo = null
     return {
       props: {
