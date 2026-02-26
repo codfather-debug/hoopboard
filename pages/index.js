@@ -77,6 +77,16 @@ export default function Home({ nbaGames, ncaaGames, fetchedAt, dateStr }) {
             <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: '"IBM Plex Mono", monospace' }}>
               NBA + NCAA MEN'S
             </span>
+            <Link href="/nba" style={{
+              fontFamily: '"IBM Plex Mono", monospace',
+              fontSize: 10,
+              color: 'var(--nba)',
+              textDecoration: 'none',
+              padding: '3px 8px',
+              border: '1px solid rgba(201,162,39,0.3)',
+              borderRadius: 3,
+              letterSpacing: '1px',
+            }}>NBA ⚡</Link>
           </div>
 
           {/* Date navigation */}
